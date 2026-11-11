@@ -12,7 +12,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Mutex, OnceLock};
 
 use aidrummer_engine::{
-    advice_report, advise, apply_advice, ask_advice, ask_plan, list_models, selection_report,
+    advice_report, advise_at, apply_advice, ask_advice, ask_plan, list_models, selection_report,
     Advice, AiSettings, DrumNote, DrumPlan, Feel, Hat,
 };
 use fragile::Fragile;
@@ -478,7 +478,12 @@ fn compute_advice(reaper: &Reaper) -> Result<AdviceSet, String> {
         .ok_or("aucune batterie MIDI dans la sélection. Une piste est lue comme batterie si son nom, un de ses effets ou son dossier parle de batterie (« drums », « Superior Drummer »…).")?;
     let (track, part) = passage.drums.swap_remove(index);
     // Les conseils comparent la batterie au vrai morceau, jamais au motif de base.
-    let advices = advise(&part, passage.grid(), &passage.audio_accents());
+    let advices = advise_at(
+        &part,
+        passage.grid(),
+        &passage.audio_accents(),
+        passage.analysis.first_measure,
+    );
     Ok(AdviceSet {
         passage,
         track,

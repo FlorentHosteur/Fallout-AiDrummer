@@ -143,7 +143,7 @@ La console de REAPER affiche, pour chaque piste qui sonne dans la sélection, so
 
 ```
 AI Drummer : analyse de la sélection
-  de 192.000 s à 209.455 s · 110.00 BPM · mesure de 4 noires · 8.0 mesures
+  mesures 89 à 96 (3:12.000 à 3:29.455) · 110.00 BPM · mesure de 4 noires · 8.0 mesures
   Motif dominant par piste (X accent fort, x accent léger, . rien) :
     Basse    X..x ..X. X.x. X...   retard de 5 ms, régularité 2 ms
     Guitare  X..x ..X. X.x. X...   retard de 30 ms, régularité 2 ms
@@ -165,6 +165,7 @@ Le détail complet (accents mesure par mesure, niveau sonore de chaque mesure) e
 
 À savoir :
 
+- Les repères sont ceux de la règle de REAPER : numéros de mesure du projet, et temps en minutes:secondes.
 - Le tempo et les mesures viennent du projet, pas de l'audio. Si le tempo change dans la sélection, la console le signale et la grille utilisée est une moyenne.
 - Le son lu est celui des items, avant les effets de la piste. Les items muets ne comptent pas : leur piste apparaît dans « Sans son ».
 - Une piste est lue comme batterie si son nom, l'un de ses effets, ou un dossier qui la contient parle de batterie (« drums », « Batterie », « Superior Drummer », « Drum Kit »…).
@@ -229,10 +230,10 @@ Avec une sélection de temps qui contient de l'audio et une batterie MIDI, lance
 |---|---|
 | Appuyer des accents forts par une grosse caisse | Ajoute une grosse caisse là où le morceau accentue et où la batterie ne joue ni grosse caisse ni caisse claire. Avec plusieurs pistes audio, seuls comptent les accents joués par au moins deux d'entre elles. |
 | Recaler des grosses caisses sur l'accent voisin | Déplace une grosse caisse posée une double croche à côté d'un accent fort. |
-| Alléger des grosses caisses qui ne répondent à rien | Retire les grosses caisses jouées entre les temps, là où aucune piste n'attaque. |
+| Alléger des grosses caisses qui ne répondent à rien | Retire les grosses caisses jouées entre les temps, là où aucune piste n'attaque. Ce conseil n'apparaît que si la grosse caisse suit le morceau dans l'ensemble (au moins la moitié de ses coups sur des accents) : une double pédale ou un passage où peu de pistes sonnent ne sont pas des écarts. |
 | Donner du relief au charleston ou à la ride | Allège les contretemps quand tous les coups ont la même force. |
 
-Chaque conseil indique où il s'applique (« mesure 3, contretemps du temps 2 »).
+Chaque conseil indique où il s'applique, avec le numéro de mesure du projet (« mesure 138, contretemps du temps 2 »).
 
 Ta batterie n'est jamais modifiée. « AI Drummer : écrire la batterie corrigée (tous les conseils) » écrit une copie corrigée sur la piste « AI Drummer » ; coupe ta piste d'origine pour comparer, et annule si ça ne te plaît pas. Dans le panneau, tu coches les conseils à garder avant d'écrire la copie.
 

@@ -294,6 +294,7 @@ mod tests {
         SelectionAnalysis {
             start_s: 0.0,
             end_s: 4.0,
+            first_measure: 1,
             grid: Grid {
                 bpm: 120.0,
                 beats_per_bar: 4.0,

@@ -37,6 +37,9 @@ pub struct Advice {
     pub edits: Vec<Edit>,
 }
 
+/// Part des coups de grosse caisse posés sur un accent à partir de laquelle on considère que
+/// la grosse caisse suit le morceau.
+const FOLLOWS_SHARE: f32 = 0.5;
 /// Nombre d'endroits cités dans le détail d'un conseil ; les suivants sont comptés.
 const PLACES_SHOWN: usize = 6;
 /// En dessous de cet écart entre le coup le plus fort et le plus faible, un jeu est dit plat.
@@ -51,9 +54,19 @@ const OFFBEAT_FACTOR: f32 = 0.75;
 /// `accents` : les cartes d'accents des pistes audio du même passage, sur la même grille.
 /// Sans accents, seuls les conseils sur la dynamique sont possibles.
 pub fn advise(part: &[DrumNote], grid: &Grid, accents: &[AccentMap]) -> Vec<Advice> {
+    advise_at(part, grid, accents, 1)
+}
+
+/// Comme `advise`, en nommant les endroits par leur numéro de mesure dans le projet.
+/// `first_measure` : numéro de la mesure 0 de la grille.
+pub fn advise_at(
+    part: &[DrumNote],
+    grid: &Grid,
+    accents: &[AccentMap],
+    first_measure: i64,
+) -> Vec<Advice> {
     let combined = combined_accents(accents);
     let per_beat = grid.slots_per_beat as usize;
-    let first_bar = combined.first().map(|(bar, _)| *bar).unwrap_or(0);
     let accent_at = |cell: (i64, usize)| -> f32 {
         combined
             .iter()
@@ -79,7 +92,7 @@ pub fn advise(part: &[DrumNote], grid: &Grid, accents: &[AccentMap]) -> Vec<Advi
             .count()
             >= tracks_needed
     };
-    let place = |cell: (i64, usize)| place_name(cell.0 - first_bar, cell.1, per_beat);
+    let place = |cell: (i64, usize)| place_name(first_measure - 1 + cell.0, cell.1, per_beat);
     let position_of =
         |cell: (i64, usize)| cell.0 as f64 * grid.beats_per_bar + cell.1 as f64 / per_beat as f64;
 
@@ -174,8 +187,16 @@ pub fn advise(part: &[DrumNote], grid: &Grid, accents: &[AccentMap]) -> Vec<Advi
         });
     }
 
-    // Grosses caisses en l'air : hors des temps, là où le morceau ne joue rien.
-    if !combined.is_empty() {
+    // Grosses caisses en l'air : hors des temps, là où le morceau ne joue rien. On ne le dit que
+    // si la grosse caisse suit le morceau dans l'ensemble : quand la plupart de ses coups tombent
+    // ailleurs que sur les accents (double pédale, passage où peu de pistes sonnent), elle a sa
+    // propre logique et ces coups ne sont pas des écarts.
+    let on_accents = kicks
+        .iter()
+        .filter(|k| accent_at(slot_of(k.position_qn, grid)) >= ANY_ACCENT)
+        .count();
+    let follows_the_song = on_accents as f32 >= FOLLOWS_SHARE * kicks.len() as f32;
+    if !combined.is_empty() && follows_the_song {
         let stray: Vec<&&DrumNote> = kicks
             .iter()
             .filter(|k| {
@@ -192,8 +213,12 @@ pub fn advise(part: &[DrumNote], grid: &Grid, accents: &[AccentMap]) -> Vec<Advi
                 .collect();
             advices.push(Advice {
                 title: format!(
-                    "Alléger {} qui ne répond à rien dans le morceau",
-                    count(stray.len(), "grosse caisse", "grosses caisses")
+                    "Alléger {} dans le morceau",
+                    count(
+                        stray.len(),
+                        "grosse caisse qui ne répond à rien",
+                        "grosses caisses qui ne répondent à rien"
+                    )
                 ),
                 detail: format!(
                     "Ces coups tombent entre les temps, là où aucune piste n'attaque : {}.",
@@ -446,6 +471,19 @@ mod tests {
     }
 
     #[test]
+    fn places_use_the_project_measure_numbers() {
+        let map = accents(&[&[(0, 1.0), (10, 0.9)]]);
+        let advices = advise_at(&[hit(0, 0, 36, 110)], &grid(), &[map], 136);
+        assert!(
+            advices[0]
+                .detail
+                .contains("mesure 136, contretemps du temps 3"),
+            "{}",
+            advices[0].detail
+        );
+    }
+
+    #[test]
     fn a_kick_one_slot_off_an_accent_is_moved_onto_it() {
         // Accent fort sur la case 6, grosse caisse posée sur la case 7 où rien ne joue.
         let map = accents(&[&[(0, 1.0), (6, 0.9)]]);
@@ -472,16 +510,33 @@ mod tests {
 
     #[test]
     fn a_kick_between_beats_where_nothing_plays_is_lightened() {
-        let map = accents(&[&[(0, 1.0)]]);
-        // Case 8 : sur un temps, on la garde même sans accent. Case 11 : en l'air.
-        let part = [hit(0, 0, 36, 110), hit(0, 8, 36, 100), hit(0, 11, 36, 90)];
+        let map = accents(&[&[(0, 1.0), (4, 0.5)]]);
+        // Cases 0 et 4 : sur des accents. Case 8 : sur un temps, on la garde même sans accent.
+        // Case 11 : en l'air.
+        let part = [
+            hit(0, 0, 36, 110),
+            hit(0, 4, 36, 100),
+            hit(0, 8, 36, 100),
+            hit(0, 11, 36, 90),
+        ];
         let advices = advise(&part, &grid(), &[map]);
         assert_eq!(advices.len(), 1, "{advices:?}");
         assert!(advices[0].title.starts_with("Alléger 1 grosse caisse"));
         assert_eq!(
             slots_of(&apply_advice(&part, &[&advices[0]]), 36),
-            vec![0, 8]
+            vec![0, 4, 8]
         );
+    }
+
+    #[test]
+    fn a_kick_part_with_its_own_logic_is_not_told_to_lighten() {
+        // Double pédale sur un morceau qui n'attaque qu'au premier temps : une seule grosse
+        // caisse sur huit tombe sur un accent. Ce n'est pas un écart, c'est un parti pris.
+        let map = accents(&[&[(0, 1.0)]]);
+        let part: Vec<DrumNote> = (0..8).map(|i| hit(0, i * 2 + 1, 36, 100)).collect();
+        let mut part = part;
+        part.push(hit(0, 0, 36, 110));
+        assert!(advise(&part, &grid(), &[map]).is_empty());
     }
 
     #[test]

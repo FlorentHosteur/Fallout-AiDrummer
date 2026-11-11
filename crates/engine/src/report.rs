@@ -18,6 +18,9 @@ pub struct SelectionAnalysis {
     /// Début et fin de la sélection, en secondes dans le projet.
     pub start_s: f64,
     pub end_s: f64,
+    /// Numéro, dans le projet, de la mesure qui contient le début de la sélection
+    /// (la mesure 0 de la grille).
+    pub first_measure: i64,
     pub grid: Grid,
     /// Vrai si le tempo change dans la sélection : la grille est alors une moyenne.
     pub tempo_changes: bool,
@@ -33,9 +36,8 @@ pub fn selection_report(analysis: &SelectionAnalysis) -> String {
     let grid = &analysis.grid;
     let bars = (analysis.end_s - analysis.start_s) / grid.bar_s();
     let mut text = format!(
-        "AI Drummer : analyse de la sélection\n  de {:.3} s à {:.3} s · {:.2} BPM · mesure de {} noires · {:.1} mesures\n",
-        analysis.start_s,
-        analysis.end_s,
+        "AI Drummer : analyse de la sélection\n  {} · {:.2} BPM · mesure de {} noires · {:.1} mesures\n",
+        span_label(analysis),
         grid.bpm,
         trim_number(grid.beats_per_bar),
         bars,
@@ -137,6 +139,35 @@ fn drum_report(drums: &DrumReading) -> String {
     text
 }
 
+/// Où se trouve la sélection dans le projet : « mesures 136 à 141 (4:54.545 à 5:06.000) ».
+pub fn span_label(analysis: &SelectionAnalysis) -> String {
+    let grid = &analysis.grid;
+    // Dernière mesure touchée : celle qui contient l'instant juste avant la fin.
+    let length_s = analysis.end_s - analysis.start_s - grid.origin_s;
+    let last = analysis.first_measure + ((length_s / grid.bar_s() - 1e-9).ceil() as i64 - 1).max(0);
+    let measures = if last > analysis.first_measure {
+        format!("mesures {} à {last}", analysis.first_measure)
+    } else {
+        format!("mesure {}", analysis.first_measure)
+    };
+    format!(
+        "{measures} ({} à {})",
+        clock(analysis.start_s),
+        clock(analysis.end_s)
+    )
+}
+
+/// Un instant du projet en minutes, secondes et millièmes : 294.545 s s'écrit « 4:54.545 ».
+pub fn clock(seconds: f64) -> String {
+    let millis = (seconds.max(0.0) * 1000.0).round() as u64;
+    format!(
+        "{}:{:02}.{:03}",
+        millis / 60_000,
+        millis / 1000 % 60,
+        millis % 1000
+    )
+}
+
 /// 4.0 s'écrit « 4 », 3.5 s'écrit « 3.5 ».
 fn trim_number(value: f64) -> String {
     if (value - value.round()).abs() < 1e-9 {
@@ -174,6 +205,7 @@ mod tests {
         SelectionAnalysis {
             start_s: 8.0,
             end_s: 12.0,
+            first_measure: 5,
             grid,
             tempo_changes: false,
             tracks: vec![TrackAccents {
@@ -189,7 +221,7 @@ mod tests {
     fn report_shows_the_grid_the_pattern_and_the_timing() {
         let text = selection_report(&analysis());
         assert!(
-            text.contains("120.00 BPM · mesure de 4 noires · 2.0 mesures"),
+            text.contains("mesures 5 à 6 (0:08.000 à 0:12.000) · 120.00 BPM · mesure de 4 noires · 2.0 mesures"),
             "{text}"
         );
         assert!(
@@ -251,6 +283,23 @@ mod tests {
             text.contains("posés sur un accent du morceau : 100 %"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn positions_are_given_in_project_measures_and_clock_time() {
+        assert_eq!(clock(294.545), "4:54.545");
+        assert_eq!(clock(0.0), "0:00.000");
+        assert_eq!(clock(59.9996), "1:00.000");
+        // Une sélection d'une seule mesure, puis une sélection qui déborde d'un rien sur la suivante.
+        let mut one = analysis();
+        one.end_s = 10.0;
+        assert_eq!(span_label(&one), "mesure 5 (0:08.000 à 0:10.000)");
+        one.end_s = 10.1;
+        assert_eq!(span_label(&one), "mesures 5 à 6 (0:08.000 à 0:10.100)");
+        // Une sélection qui commence au milieu de la mesure 5 (grille décalée d'une seconde).
+        one.grid.origin_s = -1.0;
+        one.end_s = 9.0;
+        assert_eq!(span_label(&one), "mesure 5 (0:08.000 à 0:09.000)");
     }
 
     #[test]

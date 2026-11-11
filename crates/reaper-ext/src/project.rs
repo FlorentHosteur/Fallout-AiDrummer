@@ -5,8 +5,8 @@ use std::ffi::{c_char, CStr, CString};
 use std::ptr::null_mut;
 
 use aidrummer_engine::{
-    accent_map, detect_onsets_after_preroll, read_drums, template_accents, write_drums, AccentMap,
-    Audio, DrumNote, DrumPlan, Grid, ProjectSpan, SelectionAnalysis, TrackAccents,
+    accent_map, detect_onsets_after_preroll, read_drums, span_label, template_accents, write_drums,
+    AccentMap, Audio, DrumNote, DrumPlan, Grid, ProjectSpan, SelectionAnalysis, TrackAccents,
 };
 use reaper_medium::{MediaTrack, PositionInSeconds, ProjectContext, Reaper, TimeRangeType};
 
@@ -16,6 +16,8 @@ const SAMPLE_RATE: u32 = 44_100;
 /// Doubles croches.
 const SLOTS_PER_BEAT: u32 = 4;
 const MIN_SELECTION_S: f64 = 0.5;
+/// Marge pour reconnaître une sélection posée sur une barre de mesure.
+const BAR_EDGE_S: f64 = 0.002;
 /// Avance de lecture avant la sélection.
 const PREROLL_S: f64 = 0.1;
 const MAX_SELECTION_S: f64 = 15.0 * 60.0;
@@ -33,6 +35,8 @@ const EDGE_QN: f64 = 1e-6;
 /// La grille du projet autour de la sélection, avec ses repères en noires.
 struct ProjectGrid {
     grid: Grid,
+    /// Numéro, dans le projet, de la mesure qui contient le début de la sélection.
+    first_measure: i64,
     tempo_changes: bool,
     /// Début et fin de la sélection, en noires depuis le début du projet.
     start_qn: f64,
@@ -124,8 +128,8 @@ pub fn write_passage(
         )
     };
     Ok(format!(
-        "{written} notes écrites sur la piste « {SKETCH_TRACK} », de {:.3} s à {:.3} s, {basis}.\n  Pour annuler : Édition → Annuler.",
-        passage.analysis.start_s, passage.analysis.end_s,
+        "{written} notes écrites sur la piste « {SKETCH_TRACK} », {}, {basis}.\n  Pour annuler : Édition → Annuler.",
+        span_label(&passage.analysis),
     ))
 }
 
@@ -213,6 +217,7 @@ fn analyze(
     let analysis = SelectionAnalysis {
         start_s,
         end_s,
+        first_measure: project_grid.first_measure,
         grid,
         tempo_changes: project_grid.tempo_changes,
         tracks,
@@ -228,7 +233,9 @@ fn read_grid(reaper: &Reaper, start_s: f64, end_s: f64) -> Result<ProjectGrid, S
         let position = PositionInSeconds::new(seconds).map_err(|e| e.to_string())?;
         Ok(reaper.time_map_2_time_to_qn(PROJECT, position).get())
     };
-    let start = PositionInSeconds::new(start_s).map_err(|e| e.to_string())?;
+    // Une sélection posée sur une barre de mesure peut tomber un cheveu avant elle (arrondi) :
+    // on regarde un rien plus loin pour ne pas compter la mesure précédente.
+    let start = PositionInSeconds::new(start_s + BAR_EDGE_S).map_err(|e| e.to_string())?;
     let measure_index = reaper
         .time_map_2_time_to_beats(PROJECT, start)
         .measure_index;
@@ -236,13 +243,19 @@ fn read_grid(reaper: &Reaper, start_s: f64, end_s: f64) -> Result<ProjectGrid, S
 
     let (start_qn, end_qn) = (qn_at(start_s)?, qn_at(end_s)?);
     let origin_qn = measure.start_qn.get();
+    // Sélection posée sur la barre : la mesure commence exactement avec elle.
+    let bar_start_s = if (measure.start_time.get() - start_s).abs() < BAR_EDGE_S {
+        start_s
+    } else {
+        measure.start_time.get()
+    };
     let grid = Grid::from_project(
         ProjectSpan {
             start_s,
             end_s,
             start_qn,
             end_qn,
-            bar_start_s: measure.start_time.get(),
+            bar_start_s,
             bar_length_qn: measure.end_qn.get() - origin_qn,
         },
         SLOTS_PER_BEAT,
@@ -254,6 +267,8 @@ fn read_grid(reaper: &Reaper, start_s: f64, end_s: f64) -> Result<ProjectGrid, S
     let tempo_changes = (middle_qn - (start_qn + end_qn) / 2.0).abs() > 0.02;
     Ok(ProjectGrid {
         grid,
+        // REAPER compte les mesures à partir de 0 ; il les affiche à partir de 1.
+        first_measure: measure_index as i64 + 1,
         tempo_changes,
         start_qn,
         end_qn,

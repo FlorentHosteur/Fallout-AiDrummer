@@ -56,7 +56,7 @@ struct Api {
         *mut c_int,
     ) -> bool,
     end_child: unsafe extern "C" fn(Ctx),
-    text: unsafe extern "C" fn(Ctx, *const c_char),
+    text_wrapped: unsafe extern "C" fn(Ctx, *const c_char),
     text_colored: unsafe extern "C" fn(Ctx, c_int, *const c_char),
     separator_text: unsafe extern "C" fn(Ctx, *const c_char),
     button: unsafe extern "C" fn(Ctx, *const c_char, *mut f64, *mut f64) -> bool,
@@ -145,7 +145,7 @@ impl Api {
                 end: function(get_api, c"End")?,
                 begin_child: function(get_api, c"BeginChild")?,
                 end_child: function(get_api, c"EndChild")?,
-                text: function(get_api, c"Text")?,
+                text_wrapped: function(get_api, c"TextWrapped")?,
                 text_colored: function(get_api, c"TextColored")?,
                 separator_text: function(get_api, c"SeparatorText")?,
                 button: function(get_api, c"Button")?,
@@ -563,8 +563,9 @@ impl Panel {
             ) {
                 let log = LOG.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                 for line in &log.1 {
+                    // Les lignes longues passent à la ligne au lieu d'être coupées à droite.
                     let line = c_string(line);
-                    (api.text)(ctx, line.as_ptr());
+                    (api.text_wrapped)(ctx, line.as_ptr());
                 }
                 // Une nouvelle ligne est arrivée : on descend la montrer.
                 if log.0 != self.log_seen {
