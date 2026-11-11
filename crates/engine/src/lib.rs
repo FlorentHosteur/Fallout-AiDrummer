@@ -5,12 +5,14 @@
 pub mod accents;
 pub mod analysis;
 pub mod audio;
+pub mod drums;
 pub mod onsets;
 pub mod report;
 
 pub use accents::{accent_map, AccentMap, BarAccents, Grid, ProjectSpan};
 pub use analysis::{analyze, grid_fit, GridFit, SongAnalysis};
 pub use audio::{decode_mono, Audio};
+pub use drums::{piece_of, read_drums, sketch_drums, DrumLane, DrumNote, DrumReading, Piece};
 pub use onsets::{detect_onsets, detect_onsets_after_preroll, Onset};
 pub use report::{selection_report, SelectionAnalysis, TrackAccents};
 

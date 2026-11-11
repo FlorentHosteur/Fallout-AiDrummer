@@ -22,6 +22,7 @@ use reaper_medium::{
 static SESSION: OnceLock<Fragile<ReaperSession>> = OnceLock::new();
 static SUMMARY_COMMAND: OnceLock<CommandId> = OnceLock::new();
 static ANALYZE_COMMAND: OnceLock<CommandId> = OnceLock::new();
+static SKETCH_COMMAND: OnceLock<CommandId> = OnceLock::new();
 
 /// Dossier, dans les ressources de REAPER, où l'extension écrit ses fichiers.
 const DATA_DIR: &str = "AIDrummer";
@@ -41,6 +42,12 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         &ANALYZE_COMMAND,
         "AIDRUMMER_ANALYZE_SELECTION",
         "AI Drummer : analyser la sélection",
+    )?;
+    register_action(
+        &mut session,
+        &SKETCH_COMMAND,
+        "AIDRUMMER_WRITE_SKETCH",
+        "AI Drummer : écrire une ébauche de batterie sur la sélection",
     )?;
     session.plugin_register_add_hook_command::<Actions>()?;
     let _ = SESSION.set(Fragile::new(session));
@@ -75,6 +82,10 @@ impl HookCommand for Actions {
             true
         } else if ANALYZE_COMMAND.get() == Some(&command_id) {
             print_selection_analysis(reaper);
+            true
+        } else if SKETCH_COMMAND.get() == Some(&command_id) {
+            let message = project::write_sketch(reaper).unwrap_or_else(|message| message);
+            reaper.show_console_msg(format!("AI Drummer : {message}\n"));
             true
         } else {
             false

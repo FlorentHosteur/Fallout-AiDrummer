@@ -3,6 +3,7 @@
 use serde::Serialize;
 
 use crate::accents::{AccentMap, Grid};
+use crate::drums::DrumReading;
 
 /// Les accents d'une piste sur la sélection.
 #[derive(Debug, Clone, Serialize)]
@@ -23,6 +24,8 @@ pub struct SelectionAnalysis {
     pub tracks: Vec<TrackAccents>,
     /// Pistes sans son dans la sélection.
     pub silent_tracks: Vec<String>,
+    /// Parties de batterie MIDI trouvées dans la sélection.
+    pub drums: Vec<DrumReading>,
 }
 
 /// Le compte rendu en texte, pour la console de REAPER.
@@ -77,6 +80,54 @@ pub fn selection_report(analysis: &SelectionAnalysis) -> String {
             analysis.silent_tracks.join(", ")
         ));
     }
+    for drums in &analysis.drums {
+        text.push_str(&drum_report(drums));
+    }
+    text
+}
+
+fn drum_report(drums: &DrumReading) -> String {
+    let hits: usize = drums.lanes.iter().map(|lane| lane.hits).sum();
+    let mut text = format!(
+        "  Batterie MIDI « {} » ({hits} coups ; X dans la plupart des mesures, x dans certaines) :\n",
+        drums.track
+    );
+    let label_width = drums
+        .lanes
+        .iter()
+        .map(|lane| lane.piece.label().chars().count())
+        .max()
+        .unwrap_or(0);
+    for lane in &drums.lanes {
+        text.push_str(&format!(
+            "    {:<label_width$}  {}\n",
+            lane.piece.label(),
+            lane.pattern
+        ));
+    }
+    if !drums.unknown_notes.is_empty() {
+        let list: Vec<String> = drums
+            .unknown_notes
+            .iter()
+            .map(|(note, count)| format!("{note} ({count} coup{})", if *count > 1 { "s" } else { "" }))
+            .collect();
+        text.push_str(&format!(
+            "    Notes absentes de la table, rangées dans « autres notes » : {}\n",
+            list.join(", ")
+        ));
+    }
+    if let Some(share) = drums.accents_covered {
+        text.push_str(&format!(
+            "    Accents forts du morceau repris par la grosse caisse ou la caisse claire : {:.0} %\n",
+            share * 100.0
+        ));
+    }
+    if let Some(share) = drums.kicks_on_accents {
+        text.push_str(&format!(
+            "    Coups de grosse caisse posés sur un accent du morceau : {:.0} %\n",
+            share * 100.0
+        ));
+    }
     text
 }
 
@@ -126,6 +177,7 @@ mod tests {
                 accents: accent_map(&audio, &onsets, grid),
             }],
             silent_tracks: vec!["Clic".to_string()],
+            drums: Vec::new(),
         }
     }
 
@@ -150,6 +202,33 @@ mod tests {
         let mut analysis = analysis();
         analysis.tracks.clear();
         assert!(selection_report(&analysis).contains("Aucune piste ne contient de son"));
+    }
+
+    #[test]
+    fn report_shows_an_existing_drum_part() {
+        use crate::drums::{read_drums, DrumNote};
+        let mut analysis = analysis();
+        // Grosse caisse sur chaque temps des deux mesures, plus une note inconnue.
+        let mut part: Vec<DrumNote> = (0..8)
+            .map(|beat| DrumNote {
+                position_qn: beat as f64,
+                note: 36,
+                velocity: 100,
+            })
+            .collect();
+        part.push(DrumNote {
+            position_qn: 0.5,
+            note: 31,
+            velocity: 90,
+        });
+        let maps: Vec<_> = analysis.tracks.iter().map(|t| t.accents.clone()).collect();
+        analysis.drums = vec![read_drums("drums", &part, &analysis.grid, &maps)];
+        let text = selection_report(&analysis);
+        assert!(text.contains("Batterie MIDI « drums » (9 coups"), "{text}");
+        assert!(text.contains("grosse caisse  X... X... X... X..."), "{text}");
+        assert!(text.contains("rangées dans « autres notes » : 31 (1 coup)"), "{text}");
+        assert!(text.contains("repris par la grosse caisse ou la caisse claire : 100 %"), "{text}");
+        assert!(text.contains("posés sur un accent du morceau : 100 %"), "{text}");
     }
 
     #[test]
