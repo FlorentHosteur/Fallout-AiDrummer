@@ -27,7 +27,32 @@ C'est un squelette. Ce qui existe aujourd'hui :
 
 Limite connue : la grille de temps et la tonalité renvoyées par la bibliothèque `stratum-dsp` (commande `analyze`) sont peu fiables. La carte d'accents ne s'en sert pas : elle part du tempo du projet REAPER.
 
+## Installer sans compiler
+
+La page [Publications](https://github.com/FlorentHosteur/Fallout-AiDrummer/releases/latest) du dépôt propose l'extension déjà compilée.
+
+### Windows
+
+1. Télécharge `reaper_aidrummer.dll`.
+2. Ferme REAPER.
+3. Dans l'explorateur de fichiers, tape `%APPDATA%\REAPER\UserPlugins` dans la barre d'adresse et dépose-y le fichier. Si REAPER est installé en mode portable, le dossier `UserPlugins` est dans son dossier d'installation.
+4. Relance REAPER : *Actions → Show action list*, tape « AI Drummer ».
+
+### macOS (Apple Silicon)
+
+1. Télécharge `reaper_aidrummer-arm64.dylib`.
+2. Ferme REAPER et dépose le fichier dans `~/Library/Application Support/REAPER/UserPlugins`.
+3. Relance REAPER. Si macOS refuse de charger le fichier, autorise-le dans *Réglages Système → Confidentialité et sécurité*.
+
+### Pour le panneau
+
+Le panneau demande en plus ReaPack et ReaImGui : voir « Le panneau » plus bas. Les actions fonctionnent sans eux.
+
+Pour mettre à jour, remplace le fichier par celui de la publication suivante.
+
 ## Installer le kit de développement
+
+Cette partie ne sert que pour compiler soi-même ou modifier le code.
 
 Il faut trois outils : Git, un compilateur C++ et Rust. REAPER 7 doit être installé.
 
@@ -291,6 +316,7 @@ Un test est volontairement ignoré : il documente l'imprécision de la grille de
 | `crates/cli` | La commande `aidrummer`, pour essayer le moteur sans REAPER. |
 | `crates/reaper-ext` | L'extension chargée par REAPER : actions, lecture et écriture du projet, panneau. Elle s'appuie sur [reaper-rs](https://github.com/helgoboss/reaper-rs) et, pour le panneau, sur [ReaImGui](https://github.com/cfillion/reaimgui). |
 | `scripts` | Compilation et installation dans REAPER. |
+| `.github/workflows` | Tests à chaque envoi ; publication des binaires quand une étiquette `v…` est poussée. |
 | `docs/pilotage.html` | Source de la page de suivi du projet. |
 
 `reaper-rs` n'est pas publié sur crates.io : il est pris sur son dépôt Git, à la version figée dans `Cargo.lock`.

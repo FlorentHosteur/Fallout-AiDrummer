@@ -1,0 +1,56 @@
+name: Publication
+
+# Pousser une étiquette « v… » compile l'extension pour Windows et macOS et la met en
+# téléchargement sur la page des publications du dépôt.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Créer la publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" \
+            --title "AI Drummer $GITHUB_REF_NAME" \
+            --notes "Extension REAPER prête à installer, sans compiler. Voir le README, section « Installer sans compiler »."
+
+  binaires:
+    needs: publication
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            built: target/release/reaper_aidrummer.dll
+            asset: reaper_aidrummer.dll
+          - os: macos-latest
+            built: target/release/libreaper_aidrummer.dylib
+            asset: reaper_aidrummer-arm64.dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Compiler
+        shell: bash
+        run: |
+          # Sous Windows, on embarque la bibliothèque C++ de Microsoft dans la DLL : elle se
+          # charge alors sans rien installer d'autre sur la machine.
+          if [ "$RUNNER_OS" = "Windows" ]; then export RUSTFLAGS="-C target-feature=+crt-static"; fi
+          cargo build --release -p reaper_aidrummer
+      - name: Joindre à la publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          cp "${{ matrix.built }}" "dist/${{ matrix.asset }}"
+          gh release upload "$GITHUB_REF_NAME" "dist/${{ matrix.asset }}" --clobber
