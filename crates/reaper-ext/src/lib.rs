@@ -6,11 +6,15 @@
 mod panel;
 mod project;
 
+use std::cell::RefCell;
 use std::error::Error;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Mutex, OnceLock};
 
-use aidrummer_engine::{ask_plan, list_models, selection_report, AiSettings, DrumPlan, Feel, Hat};
+use aidrummer_engine::{
+    advice_report, advise, apply_advice, ask_advice, ask_plan, list_models, selection_report,
+    Advice, AiSettings, DrumNote, DrumPlan, Feel, Hat,
+};
 use fragile::Fragile;
 use project::Passage;
 use reaper_low::PluginContext;
@@ -50,9 +54,12 @@ enum Action {
     AiModels,
     AiSettings,
     Panel,
+    Advice,
+    ApplyAdvice,
+    AiAdvice,
 }
 
-const ACTION_TABLE: [(Action, &str, &str); 8] = [
+const ACTION_TABLE: [(Action, &str, &str); 11] = [
     (
         Action::Summary,
         "AIDRUMMER_PROJECT_SUMMARY",
@@ -93,12 +100,28 @@ const ACTION_TABLE: [(Action, &str, &str); 8] = [
         "AIDRUMMER_PANEL",
         "AI Drummer : ouvrir ou fermer le panneau",
     ),
+    (
+        Action::Advice,
+        "AIDRUMMER_ADVICE",
+        "AI Drummer : conseils sur la batterie de la sélection",
+    ),
+    (
+        Action::ApplyAdvice,
+        "AIDRUMMER_APPLY_ADVICE",
+        "AI Drummer : écrire la batterie corrigée (tous les conseils)",
+    ),
+    (
+        Action::AiAdvice,
+        "AIDRUMMER_AI_ADVICE",
+        "AI Drummer : avis de l'IA sur la batterie de la sélection",
+    ),
 ];
 
 /// Ce qu'une demande à l'IA rapporte au fil principal.
 enum Answer {
     Models(Result<Vec<String>, String>),
     Plan(Result<DrumPlan, String>, Box<Passage>),
+    Advice(Result<String, String>),
 }
 
 #[reaper_extension_plugin]
@@ -190,6 +213,9 @@ impl HookCommand for Actions {
             Action::AiModels => start_models(reaper),
             Action::AiSettings => show_settings(reaper),
             Action::Panel => toggle_panel(reaper),
+            Action::Advice => show_advice(reaper),
+            Action::ApplyAdvice => write_corrected(reaper, None),
+            Action::AiAdvice => start_ai_advice(reaper, None),
         }
         true
     }
@@ -384,8 +410,15 @@ fn collect_answer() {
     };
     match answer {
         None => say(reaper, "la demande à l'IA s'est interrompue sans réponse."),
-        Some(Answer::Models(Err(message))) | Some(Answer::Plan(Err(message), _)) => {
-            say(reaper, message)
+        Some(Answer::Models(Err(message)))
+        | Some(Answer::Plan(Err(message), _))
+        | Some(Answer::Advice(Err(message))) => say(reaper, message),
+        Some(Answer::Advice(Ok(advice))) => {
+            let lines: Vec<String> = advice.lines().map(|line| format!("  {line}")).collect();
+            say(
+                reaper,
+                format!("avis de l'IA sur la batterie\n{}", lines.join("\n")),
+            );
         }
         Some(Answer::Models(Ok(models))) if panel::is_open() => {
             say(
@@ -419,6 +452,127 @@ fn collect_answer() {
         }
         Some(Answer::Plan(Ok(plan), passage)) => write_ai_drums(reaper, &plan, &passage),
     }
+}
+
+/// Les derniers conseils calculés, pour pouvoir écrire la copie corrigée ensuite.
+struct AdviceSet {
+    passage: Passage,
+    track: String,
+    part: Vec<DrumNote>,
+    advices: Vec<Advice>,
+}
+
+thread_local! {
+    static LAST_ADVICE: RefCell<Option<AdviceSet>> = const { RefCell::new(None) };
+}
+
+/// Analyse le passage et tire les conseils sur sa batterie MIDI. On conseille la batterie du
+/// musicien, pas celle que l'extension a écrite : la piste « AI Drummer » ne sert qu'à défaut.
+fn compute_advice(reaper: &Reaper) -> Result<AdviceSet, String> {
+    let mut passage = project::prepare_passage(reaper)?;
+    let index = passage
+        .drums
+        .iter()
+        .position(|(name, _)| name != project::SKETCH_TRACK)
+        .or(if passage.drums.is_empty() { None } else { Some(0) })
+        .ok_or("aucune batterie MIDI dans la sélection. Une piste est lue comme batterie si son nom, un de ses effets ou son dossier parle de batterie (« drums », « Superior Drummer »…).")?;
+    let (track, part) = passage.drums.swap_remove(index);
+    let advices = advise(&part, passage.grid(), &passage.accents());
+    Ok(AdviceSet {
+        passage,
+        track,
+        part,
+        advices,
+    })
+}
+
+fn show_advice(reaper: &Reaper) {
+    let set = match compute_advice(reaper) {
+        Ok(set) => set,
+        Err(message) => return say(reaper, message),
+    };
+    let mut text = advice_report(&set.track, &set.advices);
+    if !set.advices.is_empty() {
+        text.push_str(&format!(
+            "  Pour les appliquer : {}. Une copie corrigée est écrite sur la piste « {} » ; ta batterie n'est pas modifiée.",
+            if panel::is_open() {
+                "coche ceux que tu veux dans le panneau, puis ÉCRIRE LA COPIE CORRIGÉE"
+            } else {
+                "action « AI Drummer : écrire la batterie corrigée (tous les conseils) »"
+            },
+            project::SKETCH_TRACK
+        ));
+    }
+    emit(reaper, &format!("AI Drummer : {text}"));
+    panel::set_advice(set.advices.iter().map(|a| a.title.clone()).collect());
+    LAST_ADVICE.with(|last| *last.borrow_mut() = Some(set));
+}
+
+/// Écrit la copie corrigée de la batterie. `chosen` : numéros des conseils retenus (tous si absent).
+fn write_corrected(reaper: &Reaper, chosen: Option<Vec<usize>>) {
+    LAST_ADVICE.with(|last| {
+        let last = last.borrow();
+        let Some(set) = last.as_ref() else {
+            return say(
+                reaper,
+                "demande d'abord les conseils (action « AI Drummer : conseils sur la batterie de la sélection »).",
+            );
+        };
+        let kept: Vec<&Advice> = match &chosen {
+            Some(indexes) => indexes.iter().filter_map(|&i| set.advices.get(i)).collect(),
+            None => set.advices.iter().collect(),
+        };
+        if kept.is_empty() {
+            return say(reaper, "aucun conseil retenu : rien à écrire.");
+        }
+        let corrected = apply_advice(&set.part, &kept);
+        say(
+            reaper,
+            match project::write_notes(reaper, &set.passage, &corrected) {
+                Ok(written) => format!(
+                    "copie corrigée de « {} » écrite sur la piste « {} » : {written} notes, {}. Ta batterie d'origine n'est pas modifiée ; coupe-la pour comparer.\n  Pour annuler : Édition → Annuler.",
+                    set.track,
+                    project::SKETCH_TRACK,
+                    if kept.len() > 1 { format!("{} conseils appliqués", kept.len()) } else { "1 conseil appliqué".to_string() },
+                ),
+                Err(message) => message,
+            },
+        );
+    });
+}
+
+fn start_ai_advice(reaper: &Reaper, instruction: Option<String>) {
+    let (settings, file) = match load_settings(reaper) {
+        Ok(loaded) => loaded,
+        Err(message) => return say(reaper, message),
+    };
+    if settings.model.is_empty() {
+        return say(
+            reaper,
+            format!("aucun modèle choisi. Renseigne « model » (et « api_key ») dans {file}"),
+        );
+    }
+    let set = match compute_advice(reaper) {
+        Ok(set) => set,
+        Err(message) => return say(reaper, message),
+    };
+    let (sender, receiver) = mpsc::channel();
+    if !begin_request(reaper, receiver) {
+        return;
+    }
+    say(
+        reaper,
+        format!(
+            "avis demandé à {} sur la batterie « {} ». REAPER reste utilisable.",
+            settings.model, set.track
+        ),
+    );
+    let findings = advice_report(&set.track, &set.advices);
+    let analysis = set.passage.analysis;
+    std::thread::spawn(move || {
+        let advice = ask_advice(&settings, &analysis, &findings, instruction.as_deref());
+        let _ = sender.send(Answer::Advice(advice));
+    });
 }
 
 fn is_busy() -> bool {
@@ -469,6 +623,11 @@ fn run_panel() {
             }
             panel::Command::ListModels => start_models(reaper),
             panel::Command::SaveSettings(settings) => save_settings(reaper, &settings),
+            panel::Command::Advice => show_advice(reaper),
+            panel::Command::AiAdvice(instruction) => {
+                start_ai_advice(reaper, Some(instruction).filter(|text| !text.is_empty()))
+            }
+            panel::Command::ApplyAdvice(chosen) => write_corrected(reaper, Some(chosen)),
         }
     }
 }

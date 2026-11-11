@@ -111,11 +111,11 @@ pub struct DrumReading {
 const OFTEN: f32 = 0.6;
 const SOMETIMES: f32 = 0.25;
 /// Un accent du morceau compte comme fort à partir de cette force.
-const STRONG_ACCENT: f32 = 0.6;
-const ANY_ACCENT: f32 = 0.25;
+pub(crate) const STRONG_ACCENT: f32 = 0.6;
+pub(crate) const ANY_ACCENT: f32 = 0.25;
 
 /// Case de la grille (numéro de mesure, case dans la mesure) la plus proche d'une position.
-fn slot_of(position_qn: f64, grid: &Grid) -> (i64, usize) {
+pub(crate) fn slot_of(position_qn: f64, grid: &Grid) -> (i64, usize) {
     let per_bar = grid.slots_per_bar() as i64;
     let global = (position_qn * grid.slots_per_beat as f64).round() as i64;
     (
@@ -126,7 +126,7 @@ fn slot_of(position_qn: f64, grid: &Grid) -> (i64, usize) {
 
 /// Force de l'accent le plus fort du morceau dans chaque case de chaque mesure,
 /// toutes pistes confondues.
-fn combined_accents(tracks: &[AccentMap]) -> Vec<(i64, Vec<f32>)> {
+pub(crate) fn combined_accents(tracks: &[AccentMap]) -> Vec<(i64, Vec<f32>)> {
     let Some(first) = tracks.first() else {
         return Vec::new();
     };

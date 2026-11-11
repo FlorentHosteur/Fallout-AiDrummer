@@ -3,6 +3,7 @@
 //! Ce crate ne dépend pas de Reaper : il se teste et s'utilise seul (voir le binaire `aidrummer`).
 
 pub mod accents;
+pub mod advice;
 pub mod ai;
 pub mod analysis;
 pub mod audio;
@@ -11,7 +12,8 @@ pub mod onsets;
 pub mod report;
 
 pub use accents::{accent_map, AccentMap, BarAccents, Grid, ProjectSpan};
-pub use ai::{ask_plan, list_models, AiSettings};
+pub use advice::{advice_report, advise, apply_advice, Advice, Edit};
+pub use ai::{ask_advice, ask_plan, list_models, AiSettings};
 pub use analysis::{analyze, grid_fit, GridFit, SongAnalysis};
 pub use audio::{decode_mono, Audio};
 pub use drums::{

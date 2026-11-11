@@ -15,14 +15,15 @@ C'est un squelette. Ce qui existe aujourd'hui :
 
 | Élément | État |
 |---|---|
-| Extension chargée par REAPER, avec huit actions | fonctionne dans REAPER 7 sous macOS ; sous Windows, compile mais n'a pas encore été chargée |
+| Extension chargée par REAPER, avec onze actions | fonctionne dans REAPER 7 sous macOS ; sous Windows, compile mais n'a pas encore été chargée |
 | « Analyser la sélection » : carte d'accents de chaque piste audio, et lecture de la batterie MIDI existante | fonctionne ; exact sur un projet de synthèse, plausible mais non vérifié à l'oreille sur un vrai projet |
 | « Écrire une ébauche de batterie » : item MIDI calé sur les accents du morceau, par règles | fonctionne |
 | « Batterie avec l'IA » : une IA choisit le jeu (pulsation, charleston, densité, roulement), avec ou sans consigne écrite | fonctionne contre un faux fournisseur local ; pas encore essayé avec un vrai fournisseur |
 | La carte d'accents sur un fichier audio, en ligne de commande | fonctionne |
 | Recherche du tempo dans l'audio, sans le projet | fonctionne ; juste sur des clics de synthèse |
 | Panneau ancrable au style terminal (boutons, consigne, réglages de l'IA, journal) | s'ouvre et tourne sans erreur avec ReaImGui 0.10 sous macOS ; affichage pas encore relu par un humain |
-| Conseils sur une batterie existante, composition à partir de zéro | à faire |
+| Conseils sur une batterie existante, avec copie corrigée ; avis de l'IA | fonctionne ; conseils tirés de règles simples, à juger à l'oreille |
+| Composition à partir de zéro, sans audio dans la sélection | à faire |
 
 Limite connue : la grille de temps et la tonalité renvoyées par la bibliothèque `stratum-dsp` (commande `analyze`) sont peu fiables. La carte d'accents ne s'en sert pas : elle part du tempo du projet REAPER.
 
@@ -120,7 +121,7 @@ Deux façons de lancer AI Drummer : la liste des actions de REAPER (*Actions →
 
 ### Le panneau
 
-Le panneau regroupe tout dans une fenêtre ancrable : les boutons ANALYSER, ÉBAUCHE et BATTERIE AVEC L'IA, la consigne pour l'IA, ses réglages (adresse, modèle, clé, liste des modèles) et un journal qui remplace la console.
+Le panneau regroupe tout dans une fenêtre ancrable : les boutons ANALYSER, ÉBAUCHE et BATTERIE AVEC L'IA, la consigne pour l'IA, ses réglages (adresse, modèle, clé, liste des modèles), les conseils sur la batterie existante avec leurs cases à cocher, et un journal qui remplace la console.
 
 Il a besoin de l'extension ReaImGui, version 0.10 ou plus récente :
 
@@ -214,6 +215,25 @@ REAPER reste utilisable pendant l'attente. À la réponse, la console affiche le
 
 Chaque demande est facturée par ton fournisseur selon le modèle choisi. Le message envoyé tient en quelques centaines de mots.
 
+### Conseils sur une batterie existante
+
+Avec une sélection de temps qui contient de l'audio et une batterie MIDI, lance « AI Drummer : conseils sur la batterie de la sélection ». L'extension compare la batterie aux accents du morceau et propose des retouches :
+
+| Conseil | Ce qu'il fait |
+|---|---|
+| Appuyer des accents forts par une grosse caisse | Ajoute une grosse caisse là où le morceau accentue et où la batterie ne joue ni grosse caisse ni caisse claire. Avec plusieurs pistes audio, seuls comptent les accents joués par au moins deux d'entre elles. |
+| Recaler des grosses caisses sur l'accent voisin | Déplace une grosse caisse posée une double croche à côté d'un accent fort. |
+| Alléger des grosses caisses qui ne répondent à rien | Retire les grosses caisses jouées entre les temps, là où aucune piste n'attaque. |
+| Donner du relief au charleston ou à la ride | Allège les contretemps quand tous les coups ont la même force. |
+
+Chaque conseil indique où il s'applique (« mesure 3, contretemps du temps 2 »).
+
+Ta batterie n'est jamais modifiée. « AI Drummer : écrire la batterie corrigée (tous les conseils) » écrit une copie corrigée sur la piste « AI Drummer » ; coupe ta piste d'origine pour comparer, et annule si ça ne te plaît pas. Dans le panneau, tu coches les conseils à garder avant d'écrire la copie.
+
+Ces conseils viennent de règles simples : ils signalent des écarts, pas des fautes. Sur un passage très dense, le premier peut proposer beaucoup de grosses caisses ; garde ce qui sonne.
+
+« AI Drummer : avis de l'IA sur la batterie de la sélection » envoie le même compte rendu, la batterie et ces remarques à ton modèle, qui répond par cinq conseils au plus, en texte. Dans le panneau, ce que tu écris dans la consigne lui est transmis : tu peux y poser une question (« le refrain est-il trop chargé ? »).
+
 ### Vérifier que l'extension est chargée
 
 L'action « AI Drummer : résumé du projet » affiche le tempo, le nombre de pistes et la sélection de temps.
@@ -260,7 +280,7 @@ Un test est volontairement ignoré : il documente l'imprécision de la grille de
 
 | Dossier | Rôle |
 |---|---|
-| `crates/engine` | Le moteur : décodage audio, détection d'attaques, carte d'accents, lecture et écriture de batterie, appel à l'IA. Ne dépend pas de REAPER, se teste seul. |
+| `crates/engine` | Le moteur : décodage audio, détection d'attaques, carte d'accents, lecture, écriture et conseils de batterie, appel à l'IA. Ne dépend pas de REAPER, se teste seul. |
 | `crates/cli` | La commande `aidrummer`, pour essayer le moteur sans REAPER. |
 | `crates/reaper-ext` | L'extension chargée par REAPER : actions, lecture et écriture du projet, panneau. Elle s'appuie sur [reaper-rs](https://github.com/helgoboss/reaper-rs) et, pour le panneau, sur [ReaImGui](https://github.com/cfillion/reaimgui). |
 | `scripts` | Compilation et installation dans REAPER. |

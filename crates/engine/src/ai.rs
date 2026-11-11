@@ -160,27 +160,69 @@ pub fn ask_plan(
     analysis: &SelectionAnalysis,
     instruction: Option<&str>,
 ) -> Result<DrumPlan, String> {
+    parse_plan(&chat(
+        settings,
+        SYSTEM_PROMPT,
+        &user_prompt(analysis, instruction),
+    )?)
+}
+
+const ADVICE_PROMPT: &str = "\
+Tu es un batteur de studio expérimenté. On te donne le compte rendu chiffré d'un passage d'un \
+morceau en cours de composition : tempo, mesure, motif rythmique dominant de chaque piste \
+(un groupe par noire ; X accent fort, x accent léger, . rien), mise en place, niveau sonore par \
+mesure, la batterie MIDI existante élément par élément, et les remarques déjà tirées par un \
+programme de la comparaison entre cette batterie et les accents du morceau. Tu ne reçois pas \
+l'audio.
+
+Donne au musicien au plus cinq conseils pour améliorer cette batterie : ce qu'il faut changer, \
+à quel endroit, et pourquoi. Sois concret (élément, temps, mesure) et ne répète pas les remarques \
+du programme. Réponds en français, en texte simple, un conseil par ligne commençant par un \
+tiret, sans titre ni mise en forme. Si le musicien pose une question ou donne une consigne, \
+réponds-y d'abord.";
+
+/// Demande à l'IA son avis sur la batterie existante du passage. `findings` : les conseils déjà
+/// tirés par le moteur, en texte. Bloque jusqu'à la réponse.
+pub fn ask_advice(
+    settings: &AiSettings,
+    analysis: &SelectionAnalysis,
+    findings: &str,
+    instruction: Option<&str>,
+) -> Result<String, String> {
+    let mut user = user_prompt(analysis, instruction);
+    user.push_str("\nRemarques du programme :\n");
+    user.push_str(findings);
+    let answer = chat(settings, ADVICE_PROMPT, &user)?;
+    let answer = answer.trim();
+    if answer.is_empty() {
+        return Err("l'IA a répondu par un texte vide".to_string());
+    }
+    Ok(answer.to_string())
+}
+
+/// Envoie un échange système + utilisateur et rend le texte de la réponse.
+fn chat(settings: &AiSettings, system: &str, user: &str) -> Result<String, String> {
     if settings.model.is_empty() {
         return Err("aucun modèle choisi (réglage model)".to_string());
     }
     let body = json!({
         "model": settings.model,
         "messages": [
-            { "role": "system", "content": SYSTEM_PROMPT },
-            { "role": "user", "content": user_prompt(analysis, instruction) },
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
         ],
     });
     let request = settings.authorize(settings.agent().post(&settings.url("chat/completions")?));
     let response: Value = read_json(request.send_json(body))?;
-    let answer = response["choices"][0]["message"]["content"]
+    response["choices"][0]["message"]["content"]
         .as_str()
+        .map(str::to_string)
         .ok_or_else(|| {
             format!(
                 "réponse inattendue du fournisseur : « {} »",
                 excerpt(&response.to_string())
             )
-        })?;
-    parse_plan(answer)
+        })
 }
 
 /// Liste les identifiants des modèles proposés par le fournisseur, triés.
@@ -336,6 +378,29 @@ mod tests {
         );
         assert!(request.contains(r#""model":"test/modele""#), "{request}");
         assert!(request.contains("plus lourd sur le refrain"), "{request}");
+    }
+
+    #[test]
+    fn advice_request_carries_the_findings_and_returns_the_text() {
+        let (settings, request) = fake_provider(
+            "200 OK",
+            completion("- Ouvre le charleston sur le dernier temps.\n- Allège la mesure 3.\n"),
+        );
+        let advice = ask_advice(
+            &settings,
+            &analysis(),
+            "1. Appuyer 2 accents forts",
+            Some("trop chargé ?"),
+        )
+        .unwrap();
+        assert_eq!(
+            advice,
+            "- Ouvre le charleston sur le dernier temps.\n- Allège la mesure 3."
+        );
+        let request = request.recv().unwrap();
+        assert!(request.contains("Remarques du programme"), "{request}");
+        assert!(request.contains("Appuyer 2 accents forts"), "{request}");
+        assert!(request.contains("trop charg"), "{request}");
     }
 
     #[test]

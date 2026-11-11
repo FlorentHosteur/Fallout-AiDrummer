@@ -46,28 +46,49 @@ struct ProjectGrid {
 pub fn analyze_selection(reaper: &Reaper) -> Result<SelectionAnalysis, String> {
     let (start_s, end_s) = selection(reaper)?;
     let project_grid = read_grid(reaper, start_s, end_s)?;
-    Ok(analyze(reaper, start_s, end_s, &project_grid))
+    Ok(analyze(reaper, start_s, end_s, &project_grid).0)
 }
 
 /// Un passage analysé, prêt à recevoir une batterie. Ne contient que des données : il peut
 /// attendre la réponse de l'IA hors du fil principal.
 pub struct Passage {
     pub analysis: SelectionAnalysis,
+    /// Les parties de batterie MIDI du passage : (nom de la piste, notes).
+    pub drums: Vec<(String, Vec<DrumNote>)>,
     grid: ProjectGrid,
+}
+
+impl Passage {
+    pub fn grid(&self) -> &Grid {
+        &self.grid.grid
+    }
+
+    /// Les cartes d'accents des pistes audio du passage.
+    pub fn accents(&self) -> Vec<AccentMap> {
+        self.analysis
+            .tracks
+            .iter()
+            .map(|t| t.accents.clone())
+            .collect()
+    }
 }
 
 /// Analyse la sélection et vérifie qu'on peut y caler une batterie.
 pub fn prepare_passage(reaper: &Reaper) -> Result<Passage, String> {
     let (start_s, end_s) = selection(reaper)?;
     let grid = read_grid(reaper, start_s, end_s)?;
-    let analysis = analyze(reaper, start_s, end_s, &grid);
+    let (analysis, drums) = analyze(reaper, start_s, end_s, &grid);
     if analysis.tracks.is_empty() {
         return Err(
             "Aucune piste ne contient de son dans la sélection : rien sur quoi caler une batterie."
                 .to_string(),
         );
     }
-    Ok(Passage { analysis, grid })
+    Ok(Passage {
+        analysis,
+        drums,
+        grid,
+    })
 }
 
 /// Écrit une batterie sur le passage, selon `plan`, dans un nouvel item MIDI de la piste
@@ -77,16 +98,30 @@ pub fn write_passage(
     passage: &Passage,
     plan: &DrumPlan,
 ) -> Result<String, String> {
+    let part = write_drums(passage.grid(), &passage.accents(), plan);
+    let written = write_notes(reaper, passage, &part)?;
+    Ok(format!(
+        "{written} notes écrites sur la piste « {SKETCH_TRACK} », de {:.3} s à {:.3} s, calées sur : {}.\n  Pour annuler : Édition → Annuler.",
+        passage.analysis.start_s,
+        passage.analysis.end_s,
+        passage
+            .analysis
+            .tracks
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+    ))
+}
+
+/// Écrit des notes sur le passage, dans un nouvel item MIDI de la piste « AI Drummer ».
+/// Les notes hors de la sélection sont laissées de côté. Renvoie le nombre de notes écrites.
+pub fn write_notes(reaper: &Reaper, passage: &Passage, part: &[DrumNote]) -> Result<usize, String> {
     let (start_s, end_s) = (passage.analysis.start_s, passage.analysis.end_s);
     let grid = &passage.grid;
-    let maps: Vec<AccentMap> = passage
-        .analysis
-        .tracks
+    let part: Vec<DrumNote> = part
         .iter()
-        .map(|t| t.accents.clone())
-        .collect();
-    let part: Vec<DrumNote> = write_drums(&grid.grid, &maps, plan)
-        .into_iter()
+        .copied()
         .filter(|note| {
             let qn = grid.origin_qn + note.position_qn;
             qn >= grid.start_qn - EDGE_QN && qn < grid.end_qn - EDGE_QN
@@ -102,18 +137,7 @@ pub fn write_passage(
     unsafe { low.Undo_EndBlock2(null_mut(), c"AI Drummer : batterie".as_ptr(), -1) };
     low.UpdateArrange();
     written?;
-
-    Ok(format!(
-        "{} notes écrites sur la piste « {SKETCH_TRACK} », de {start_s:.3} s à {end_s:.3} s, calées sur : {}.\n  Pour annuler : Édition → Annuler.",
-        part.len(),
-        passage
-            .analysis
-            .tracks
-            .iter()
-            .map(|t| t.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-    ))
+    Ok(part.len())
 }
 
 fn selection(reaper: &Reaper) -> Result<(f64, f64), String> {
@@ -133,7 +157,7 @@ fn analyze(
     start_s: f64,
     end_s: f64,
     project_grid: &ProjectGrid,
-) -> SelectionAnalysis {
+) -> (SelectionAnalysis, Vec<(String, Vec<DrumNote>)>) {
     let grid = project_grid.grid;
     // On lit un peu avant la sélection, pour ne pas prendre une note qui résonne déjà
     // pour une attaque (voir `detect_onsets_after_preroll`).
@@ -171,7 +195,7 @@ fn analyze(
         .map(|(name, part)| read_drums(name, part, &grid, &maps))
         .collect();
 
-    SelectionAnalysis {
+    let analysis = SelectionAnalysis {
         start_s,
         end_s,
         grid,
@@ -179,7 +203,8 @@ fn analyze(
         tracks,
         silent_tracks,
         drums,
-    }
+    };
+    (analysis, drum_parts)
 }
 
 /// Lit la grille du projet autour de la sélection, et dit si le tempo y change.

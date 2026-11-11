@@ -81,6 +81,7 @@ struct Api {
     ) -> bool,
     selectable:
         unsafe extern "C" fn(Ctx, *const c_char, *mut bool, *mut c_int, *mut f64, *mut f64) -> bool,
+    checkbox: unsafe extern "C" fn(Ctx, *const c_char, *mut bool) -> bool,
     set_next_item_width: unsafe extern "C" fn(Ctx, f64),
     set_next_window_size: unsafe extern "C" fn(Ctx, f64, f64, *mut c_int),
     set_scroll_here_y: unsafe extern "C" fn(Ctx, *mut f64),
@@ -152,6 +153,7 @@ impl Api {
                 input_text: function(get_api, c"InputText")?,
                 input_text_multiline: function(get_api, c"InputTextMultiline")?,
                 selectable: function(get_api, c"Selectable")?,
+                checkbox: function(get_api, c"Checkbox")?,
                 set_next_item_width: function(get_api, c"SetNextItemWidth")?,
                 set_next_window_size: function(get_api, c"SetNextWindowSize")?,
                 set_scroll_here_y: function(get_api, c"SetScrollHereY")?,
@@ -245,6 +247,12 @@ pub enum Command {
     AiDrums(String),
     ListModels,
     SaveSettings(AiSettings),
+    /// Conseils sur la batterie existante du passage.
+    Advice,
+    /// Avis de l'IA sur la batterie existante ; la consigne peut être vide.
+    AiAdvice(String),
+    /// Écrire la copie corrigée avec les conseils cochés (numéros à partir de 0).
+    ApplyAdvice(Vec<usize>),
 }
 
 struct Panel {
@@ -256,6 +264,8 @@ struct Panel {
     model: TextField,
     api_key: TextField,
     models: Vec<String>,
+    /// Les conseils en cours : (titre, coché).
+    advice: Vec<(String, bool)>,
     /// Nombre de lignes du journal déjà affichées : sert à suivre les nouvelles lignes.
     log_seen: u64,
 }
@@ -309,6 +319,7 @@ pub fn toggle(reaper: &Reaper, settings: &AiSettings) -> Result<(), String> {
         model: TextField::new(&settings.model),
         api_key: TextField::new(&settings.api_key),
         models: Vec::new(),
+        advice: Vec::new(),
         log_seen: 0,
     };
     PANEL_STATE.with(|state| *state.borrow_mut() = Some(panel));
@@ -320,6 +331,15 @@ pub fn set_models(models: Vec<String>) {
     PANEL_STATE.with(|state| {
         if let Some(panel) = state.borrow_mut().as_mut() {
             panel.models = models;
+        }
+    });
+}
+
+/// Donne au panneau les conseils à proposer ; ils sont cochés par défaut.
+pub fn set_advice(titles: Vec<String>) {
+    PANEL_STATE.with(|state| {
+        if let Some(panel) = state.borrow_mut().as_mut() {
+            panel.advice = titles.into_iter().map(|title| (title, true)).collect();
         }
     });
 }
@@ -498,6 +518,36 @@ impl Panel {
                     }
                     (api.end_child)(ctx);
                 }
+            }
+
+            (api.separator_text)(ctx, c"BATTERIE EXISTANTE".as_ptr());
+            if button(c"CONSEILS") {
+                commands.push(Command::Advice);
+            }
+            same_line();
+            let mut disabled = busy;
+            (api.begin_disabled)(ctx, &mut disabled);
+            if button(c"AVIS DE L'IA") {
+                commands.push(Command::AiAdvice(self.instruction.text()));
+            }
+            (api.end_disabled)(ctx);
+            if !self.advice.is_empty() {
+                for (index, (title, checked)) in self.advice.iter_mut().enumerate() {
+                    let label = c_string(&format!("{}. {title}##conseil{index}", index + 1));
+                    (api.checkbox)(ctx, label.as_ptr(), checked);
+                }
+                if button(c"ÉCRIRE LA COPIE CORRIGÉE") {
+                    commands.push(Command::ApplyAdvice(
+                        self.advice
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, (_, checked))| *checked)
+                            .map(|(index, _)| index)
+                            .collect(),
+                    ));
+                }
+                same_line();
+                dim(c"sur la piste AI Drummer ; l'original reste intact");
             }
 
             (api.separator_text)(ctx, c"JOURNAL".as_ptr());
