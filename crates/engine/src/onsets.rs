@@ -15,7 +15,8 @@ use crate::Audio;
 pub struct Onset {
     /// Position en secondes depuis le début de l'extrait.
     pub time_s: f64,
-    /// Force relative, entre 0 et 1 (1 = l'attaque la plus forte de l'extrait).
+    /// Force relative, entre 0 et 1 : le gain de niveau sonore apporté par l'attaque,
+    /// rapporté à celui des attaques fortes de l'extrait.
     pub strength: f32,
 }
 
@@ -74,14 +75,88 @@ pub fn detect_onsets(audio: &Audio) -> Vec<Onset> {
         }
     }
 
-    let strongest = onsets.iter().map(|o| o.strength).fold(0.0f32, f32::max);
-    if strongest > 0.0 {
-        for onset in &mut onsets {
-            onset.strength /= strongest;
-        }
+    // Le flux sert à dater les attaques, pas à dire leur force : il est compressé, et une note
+    // qui sort du silence y pèse plus qu'une note aussi forte jouée sur la résonance de la
+    // précédente. La force retenue est le gain de niveau sonore que l'attaque apporte.
+    for onset in &mut onsets {
+        onset.strength = level_rise(audio, onset.time_s);
     }
+    // Référence : le niveau des attaques fortes de l'extrait (90e centile), pas la seule plus
+    // forte, pour qu'un coup isolé plus appuyé n'écrase pas tous les autres.
+    let mut sorted: Vec<f32> = onsets.iter().map(|o| o.strength).collect();
+    sorted.sort_by(f32::total_cmp);
+    let reference = sorted
+        .get(((sorted.len().saturating_sub(1)) as f64 * 0.9).floor() as usize)
+        .copied()
+        .unwrap_or(0.0);
+    if reference <= 0.0 {
+        return Vec::new();
+    }
+    for onset in &mut onsets {
+        onset.strength = (onset.strength / reference).min(1.0);
+    }
+    onsets.retain(|onset| onset.strength >= MIN_STRENGTH);
     onsets
 }
+
+/// Niveau mesuré juste avant l'attaque, pour le comparer à celui qui suit.
+const BEFORE_S: f64 = 0.030;
+/// Niveau mesuré juste après l'attaque.
+const AFTER_S: f64 = 0.050;
+/// Marge autour de l'instant détecté, pour ne pas compter l'attaque dans le « avant ».
+const GUARD_S: f64 = 0.008;
+/// En dessous de cette force relative, ce n'est pas une note : on l'écarte.
+const MIN_STRENGTH: f32 = 0.03;
+
+/// De combien le niveau sonore monte à l'instant `time_s` (0 s'il ne monte pas).
+fn level_rise(audio: &Audio, time_s: f64) -> f32 {
+    let before = mean_square(audio, time_s - GUARD_S - BEFORE_S, time_s - GUARD_S);
+    let after = mean_square(audio, time_s - GUARD_S, time_s - GUARD_S + AFTER_S);
+    (after - before).max(0.0).sqrt() as f32
+}
+
+fn mean_square(audio: &Audio, from_s: f64, to_s: f64) -> f64 {
+    let rate = audio.sample_rate as f64;
+    let from = ((from_s * rate).max(0.0) as usize).min(audio.samples.len());
+    let to = ((to_s * rate).max(0.0) as usize).min(audio.samples.len());
+    if to <= from {
+        return 0.0;
+    }
+    audio.samples[from..to]
+        .iter()
+        .map(|&s| s as f64 * s as f64)
+        .sum::<f64>()
+        / (to - from) as f64
+}
+
+/// Détecte les attaques d'un extrait lu avec un peu d'avance (`preroll_s` secondes avant le
+/// passage voulu), puis retire cette avance : renvoie le passage seul et ses attaques, datées
+/// depuis son début.
+///
+/// Sans cette avance, un passage qui commence au milieu d'une note qui résonne produit une
+/// fausse attaque à son tout début : le son semble surgir du silence.
+pub fn detect_onsets_after_preroll(audio: &Audio, preroll_s: f64) -> (Audio, Vec<Onset>) {
+    let skip = ((preroll_s * audio.sample_rate as f64).round().max(0.0) as usize)
+        .min(audio.samples.len());
+    let skipped_s = skip as f64 / audio.sample_rate as f64;
+    let onsets = detect_onsets(audio)
+        .into_iter()
+        // Une note jouée un rien en avance sur le début du passage lui appartient encore.
+        .filter(|onset| onset.time_s >= skipped_s - EARLY_NOTE_S)
+        .map(|onset| Onset {
+            time_s: onset.time_s - skipped_s,
+            ..onset
+        })
+        .collect();
+    let passage = Audio {
+        samples: audio.samples[skip..].to_vec(),
+        sample_rate: audio.sample_rate,
+    };
+    (passage, onsets)
+}
+
+/// Avance tolérée pour une note jouée juste avant le début du passage.
+const EARLY_NOTE_S: f64 = 0.030;
 
 /// Retard, en nombre de pas, entre l'entrée d'une attaque dans la fenêtre et le pic de flux.
 /// Mesuré sur des clics de synthèse (voir les tests).

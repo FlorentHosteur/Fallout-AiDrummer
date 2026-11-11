@@ -569,6 +569,7 @@ dependencies = [
  "reaper-low",
  "reaper-macros",
  "reaper-medium",
+ "serde_json",
 ]
 
 [[package]]

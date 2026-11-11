@@ -22,7 +22,41 @@ pub struct Grid {
     pub origin_s: f64,
 }
 
+/// Ce que REAPER sait de la grille autour d'un extrait, tel que sa carte de tempo le donne.
+#[derive(Debug, Clone, Copy)]
+pub struct ProjectSpan {
+    /// Début et fin de l'extrait, en secondes dans le projet.
+    pub start_s: f64,
+    pub end_s: f64,
+    /// Les mêmes positions, en noires depuis le début du projet.
+    pub start_qn: f64,
+    pub end_qn: f64,
+    /// Début, en secondes dans le projet, de la mesure qui contient le début de l'extrait.
+    pub bar_start_s: f64,
+    /// Longueur de cette mesure, en noires.
+    pub bar_length_qn: f64,
+}
+
 impl Grid {
+    /// Construit la grille d'un extrait à partir de la carte de tempo du projet.
+    ///
+    /// Le tempo retenu est le tempo moyen sur l'extrait : exact si le tempo est constant,
+    /// approché s'il change en cours de route. Renvoie `None` si l'extrait est vide.
+    pub fn from_project(span: ProjectSpan, slots_per_beat: u32) -> Option<Grid> {
+        let seconds = span.end_s - span.start_s;
+        let quarter_notes = span.end_qn - span.start_qn;
+        if seconds <= 0.0 || quarter_notes <= 0.0 || span.bar_length_qn <= 0.0 || slots_per_beat == 0
+        {
+            return None;
+        }
+        Some(Grid {
+            bpm: 60.0 * quarter_notes / seconds,
+            beats_per_bar: span.bar_length_qn,
+            slots_per_beat,
+            origin_s: span.bar_start_s - span.start_s,
+        })
+    }
+
     pub fn slot_s(&self) -> f64 {
         60.0 / self.bpm / self.slots_per_beat as f64
     }
@@ -180,6 +214,39 @@ mod tests {
         assert_eq!(grid.slots_per_bar(), 14);
         assert!((grid.slot_s() - 0.125).abs() < 1e-12);
         assert!((grid.bar_s() - 1.75).abs() < 1e-12);
+    }
+
+    #[test]
+    fn grid_from_project_uses_the_tempo_map() {
+        // Sélection de 8 s à 100 BPM qui commence une noire après le début d'une mesure en 3/4.
+        let grid = Grid::from_project(
+            ProjectSpan {
+                start_s: 12.6,
+                end_s: 20.6,
+                start_qn: 21.0,
+                end_qn: 21.0 + 8.0 * 100.0 / 60.0,
+                bar_start_s: 12.0,
+                bar_length_qn: 3.0,
+            },
+            4,
+        )
+        .unwrap();
+        assert!((grid.bpm - 100.0).abs() < 1e-9);
+        assert_eq!(grid.slots_per_bar(), 12);
+        assert!((grid.origin_s + 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn grid_from_project_rejects_an_empty_span() {
+        let span = ProjectSpan {
+            start_s: 5.0,
+            end_s: 5.0,
+            start_qn: 10.0,
+            end_qn: 10.0,
+            bar_start_s: 4.0,
+            bar_length_qn: 4.0,
+        };
+        assert!(Grid::from_project(span, 4).is_none());
     }
 
     #[test]

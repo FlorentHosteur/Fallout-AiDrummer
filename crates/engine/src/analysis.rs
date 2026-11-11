@@ -75,7 +75,8 @@ pub fn grid_fit(beats: &[f64], project_bpm: f64, grid_origin_s: f64) -> Option<G
     let mean_angle = sin_sum.atan2(cos_sum);
     // Longueur du vecteur moyen : 1 si tous les temps ont le même décalage, 0 s'ils sont répartis au hasard.
     let resultant = (sin_sum.powi(2) + cos_sum.powi(2)).sqrt() / n;
-    let spread_angle = (-2.0 * resultant.clamp(1e-12, 1.0).ln()).sqrt();
+    // `abs` : un jeu parfaitement régulier donne -0.0, qui s'afficherait « -0 ms ».
+    let spread_angle = (-2.0 * resultant.clamp(1e-12, 1.0).ln()).abs().sqrt();
     let to_ms = period / std::f64::consts::TAU * 1000.0;
     Some(GridFit {
         project_bpm,

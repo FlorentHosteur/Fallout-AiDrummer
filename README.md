@@ -15,10 +15,11 @@ C'est un squelette. Ce qui existe aujourd'hui :
 
 | Élément | État |
 |---|---|
-| Extension chargée par REAPER, avec l'action « AI Drummer : résumé du projet » | compile sur Windows et macOS ; pas encore essayée dans REAPER |
-| Carte d'accents d'un fichier audio sur la grille du projet (accents par mesure, motif dominant, niveau par mesure, écart au clic) | fonctionne en ligne de commande ; testée sur des riffs de synthèse, pas encore sur un instrument enregistré |
+| Extension chargée par REAPER, avec deux actions | fonctionne dans REAPER 7 sous macOS ; sous Windows, compile mais n'a pas encore été chargée |
+| Action « AI Drummer : analyser la sélection » : carte d'accents de chaque piste audio sur la sélection de temps | fonctionne ; résultats exacts sur un projet de synthèse, plausibles mais non vérifiés à l'oreille sur un vrai projet |
+| La même analyse sur un fichier audio, en ligne de commande | fonctionne |
 | Recherche du tempo dans l'audio, sans le projet | fonctionne ; juste sur des clics de synthèse |
-| Lecture des pistes du projet depuis l'extension, écriture MIDI, appel à une IA, panneau | à faire |
+| Lecture du MIDI existant, écriture MIDI, appel à une IA, panneau | à faire |
 
 Limite connue : la grille de temps et la tonalité renvoyées par la bibliothèque `stratum-dsp` (commande `analyze`) sont peu fiables. La carte d'accents ne s'en sert pas : elle part du tempo du projet REAPER.
 
@@ -113,12 +114,31 @@ Le fichier produit est `target\release\reaper_aidrummer.dll` sous Windows, `targ
 ## Utiliser l'extension dans REAPER
 
 1. Démarre REAPER et ouvre un projet.
-2. Ouvre la liste des actions (*Actions → Show action list*).
-3. Cherche « AI Drummer » et lance « AI Drummer : résumé du projet ».
+2. Fais une sélection de temps sur le passage à étudier (quelques mesures).
+3. Ouvre la liste des actions (*Actions → Show action list*), cherche « AI Drummer » et lance « AI Drummer : analyser la sélection ».
 
-La console de REAPER affiche le tempo du projet, le nombre de pistes et la sélection de temps.
+La console de REAPER affiche, pour chaque piste qui sonne dans la sélection, son motif rythmique dominant et sa mise en place :
 
-Si l'action n'apparaît pas, l'extension n'a pas été chargée : vérifie que le fichier est bien dans `UserPlugins` et que REAPER a été redémarré.
+```
+AI Drummer : analyse de la sélection
+  de 192.000 s à 209.455 s · 110.00 BPM · mesure de 4 noires · 8.0 mesures
+  Motif dominant par piste (X accent fort, x accent léger, . rien) :
+    Basse    X..x ..X. X.x. X...   retard de 5 ms, régularité 2 ms
+    Guitare  X..x ..X. X.x. X...   retard de 30 ms, régularité 2 ms
+  Sans son dans la sélection : Clic
+```
+
+Le détail complet (accents mesure par mesure, niveau sonore de chaque mesure) est écrit en JSON dans le dossier de ressources de REAPER : `AIDrummer/derniere-analyse.json`.
+
+À savoir :
+
+- Le tempo et les mesures viennent du projet, pas de l'audio. Si le tempo change dans la sélection, la console le signale et la grille utilisée est une moyenne.
+- Le son lu est celui des items, avant les effets de la piste. Les items muets et les items MIDI ne comptent pas : leur piste apparaît dans « Sans son ».
+- Le projet n'est jamais modifié.
+
+L'autre action, « AI Drummer : résumé du projet », affiche le tempo, le nombre de pistes et la sélection de temps. Elle sert à vérifier que l'extension est chargée.
+
+Si les actions n'apparaissent pas, l'extension n'a pas été chargée : vérifie que le fichier est bien dans `UserPlugins` et que REAPER a été redémarré.
 
 ## Essayer l'analyse sans REAPER
 

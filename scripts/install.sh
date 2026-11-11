@@ -17,6 +17,8 @@ cargo build --release -p reaper_aidrummer
 destination="$resource_path/UserPlugins"
 mkdir -p "$destination"
 # REAPER ne charge pas un fichier dont le nom commence par « lib ».
-cp target/release/libreaper_aidrummer.dylib "$destination/reaper_aidrummer.dylib"
+# Copie puis renommage : remplacer sur place un fichier que REAPER a chargé peut le faire planter.
+cp target/release/libreaper_aidrummer.dylib "$destination/reaper_aidrummer.dylib.new"
+mv -f "$destination/reaper_aidrummer.dylib.new" "$destination/reaper_aidrummer.dylib"
 
-echo "Extension installée dans $destination. Démarre REAPER et cherche « AI Drummer » dans la liste des actions."
+echo "Extension installée dans $destination. Redémarre REAPER s'il est ouvert, puis cherche « AI Drummer » dans la liste des actions."

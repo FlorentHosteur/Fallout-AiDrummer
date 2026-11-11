@@ -1,13 +1,15 @@
 //! Vérifie la détection d'attaques et la carte d'accents sur un riff de synthèse dont on
 //! connaît chaque note. Ne dit rien de la justesse sur un vrai instrument enregistré.
 
-use aidrummer_engine::{accent_map, detect_onsets, Audio, Grid};
+use aidrummer_engine::{accent_map, detect_onsets, detect_onsets_after_preroll, Audio, Grid};
 
 const SAMPLE_RATE: u32 = 44_100;
 const BPM: f64 = 100.0;
 const BARS: usize = 4;
 /// Le riff d'une mesure : (case en doubles croches, force de la note).
 const RIFF: [(usize, f64); 6] = [(0, 1.0), (3, 0.5), (6, 0.8), (8, 1.0), (10, 0.5), (12, 0.9)];
+/// La hauteur de chaque note du riff, en hertz (la, la, do, ré, la, mi).
+const PITCHES: [f64; 6] = [110.0, 110.0, 130.81, 146.83, 110.0, 164.81];
 
 fn grid() -> Grid {
     Grid {
@@ -26,7 +28,7 @@ fn riff(delay_s: f64) -> Audio {
     let total = ((BARS as f64 * bar_s + 0.5) * SAMPLE_RATE as f64) as usize;
     let mut samples = vec![0.0f32; total];
     for bar in 0..BARS {
-        for (slot, gain) in RIFF {
+        for ((slot, gain), pitch) in RIFF.into_iter().zip(PITCHES) {
             let start_s = bar as f64 * bar_s + slot as f64 * slot_s + delay_s;
             let start = (start_s * SAMPLE_RATE as f64).round() as usize;
             for (i, sample) in samples.iter_mut().enumerate().skip(start) {
@@ -35,9 +37,9 @@ fn riff(delay_s: f64) -> Audio {
                     break;
                 }
                 let attack = (t / 0.003).min(1.0);
-                let tone: f64 = [(110.0, 1.0), (220.0, 0.5), (330.0, 0.3), (880.0, 0.2)]
+                let tone: f64 = [(1.0, 1.0), (2.0, 0.5), (3.0, 0.3), (8.0, 0.2)]
                     .iter()
-                    .map(|(f, a)| a * (std::f64::consts::TAU * f * t).sin())
+                    .map(|(harmonic, a)| a * (std::f64::consts::TAU * pitch * harmonic * t).sin())
                     .sum();
                 *sample += (0.25 * gain * attack * (-t * 6.0).exp() * tone) as f32;
             }
@@ -101,8 +103,30 @@ fn the_folded_pattern_is_the_riff() {
             assert!(strength < 0.10, "case {slot} vide mais lue à {strength:.2} ({})", map.pattern);
         }
     }
-    // Les notes fortes (cases 0 et 8) ressortent plus que les notes légères (cases 3 et 10).
-    assert!(map.folded[0] > map.folded[3] && map.folded[8] > map.folded[10], "{}", map.pattern);
+    // Les deux notes les plus appuyées (cases 0 et 8) sortent en accents forts.
+    let marks: Vec<char> = map.pattern.chars().filter(|c| *c != ' ').collect();
+    assert!(marks[0] == 'X' && marks[8] == 'X', "{}", map.pattern);
+}
+
+/// La force lue est approchée : la résonance de la note précédente s'ajoute à la suivante.
+/// On vérifie donc l'ordre, pas la valeur exacte.
+#[test]
+fn hard_notes_read_stronger_than_soft_ones() {
+    let audio = riff(0.0);
+    let map = accent_map(&audio, &detect_onsets(&audio), grid());
+    let read = |gain_min: f64, gain_max: f64| -> Vec<f32> {
+        RIFF.iter()
+            .filter(|(_, gain)| (gain_min..=gain_max).contains(gain))
+            .map(|(slot, _)| map.folded[*slot])
+            .collect()
+    };
+    let weakest_hard = read(0.8, 1.0).into_iter().fold(f32::INFINITY, f32::min);
+    let strongest_soft = read(0.0, 0.5).into_iter().fold(0.0f32, f32::max);
+    assert!(
+        weakest_hard > strongest_soft + 0.1,
+        "note forte la plus faible : {weakest_hard:.2}, note légère la plus forte : {strongest_soft:.2} ({:?})",
+        map.folded
+    );
 }
 
 #[test]
@@ -128,4 +152,50 @@ fn playing_late_reads_as_late() {
         "retard joué : 25 ms, retard lu : {:.1} ms",
         timing.mean_offset_ms
     );
+}
+
+/// Un passage qui commence au milieu d'une note qui résonne (ici 0,6 s après le début de la
+/// mesure, pendant la note de la case 3).
+fn cut(audio: &Audio, from_s: f64) -> Audio {
+    Audio {
+        samples: audio.samples[(from_s * SAMPLE_RATE as f64) as usize..].to_vec(),
+        sample_rate: SAMPLE_RATE,
+    }
+}
+
+fn grid_from(origin_s: f64) -> Grid {
+    Grid {
+        origin_s,
+        ..grid()
+    }
+}
+
+#[test]
+fn a_passage_cut_mid_note_shows_a_false_attack_without_preroll() {
+    // Ce test fixe le défaut que l'avance corrige : il échouerait si le défaut disparaissait.
+    let passage = cut(&riff(0.0), 0.6);
+    let map = accent_map(&passage, &detect_onsets(&passage), grid_from(-0.6));
+    assert!(map.bars[0].slots[4] > 0.1, "{:?}", map.bars[0].slots);
+}
+
+#[test]
+fn reading_a_little_before_the_passage_removes_the_false_attack() {
+    let with_preroll = cut(&riff(0.0), 0.5);
+    let (passage, onsets) = detect_onsets_after_preroll(&with_preroll, 0.1);
+    let map = accent_map(&passage, &onsets, grid_from(-0.6));
+    assert_eq!(map.bars[0].slots[4], 0.0, "{:?}", map.bars[0].slots);
+    // Les vraies notes de la mesure sont toujours là (cases 6, 8, 10, 12).
+    for slot in [6, 8, 10, 12] {
+        assert!(map.bars[0].slots[slot] > 0.25, "case {slot} : {:?}", map.bars[0].slots);
+    }
+}
+
+#[test]
+fn a_note_on_the_first_beat_of_the_passage_is_kept() {
+    // Passage qui commence pile sur le premier temps de la deuxième mesure.
+    let bar_s = grid().bar_s();
+    let with_preroll = cut(&riff(0.0), bar_s - 0.1);
+    let (passage, onsets) = detect_onsets_after_preroll(&with_preroll, 0.1);
+    let map = accent_map(&passage, &onsets, grid_from(0.0));
+    assert!(map.bars[0].slots[0] > 0.6, "{:?}", map.bars[0].slots);
 }
