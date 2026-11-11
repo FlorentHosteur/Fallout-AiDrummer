@@ -1,0 +1,49 @@
+{
+  "id": "rock",
+  "name": "Rock",
+  "description": "Batterie rock droite et solide, au service de la chanson.",
+  "prompt": "Reste simple et lisible : caisse claire franche sur 2 et 4, grosse caisse sur les appuis de la basse et des guitares. Le charleston fermé tient les couplets, le charleston ouvert ou la ride ouvrent les refrains. Un roulement court annonce chaque changement de partie ; pas de démonstration.",
+  "plan": {
+    "feel": "normal",
+    "hat": "eighths",
+    "kick": "accents",
+    "kick_density": 0.5,
+    "ghost_notes": false,
+    "crash": true,
+    "fill": true,
+    "fill_every": 0,
+    "intensity": 0.8
+  },
+  "examples": [
+    {
+      "situation": "Couplet, niveau moyen, guitares en retrait",
+      "plan": {
+        "hat": "eighths",
+        "kick_density": 0.4,
+        "crash": false,
+        "fill": false,
+        "intensity": 0.65
+      }
+    },
+    {
+      "situation": "Refrain, niveau fort, accords tenus",
+      "plan": {
+        "hat": "open",
+        "kick_density": 0.6,
+        "crash": true,
+        "fill": true,
+        "intensity": 0.9
+      }
+    },
+    {
+      "situation": "Pont lourd où tout ralentit",
+      "plan": {
+        "feel": "half_time",
+        "hat": "ride",
+        "kick_density": 0.5,
+        "crash": true,
+        "intensity": 0.85
+      }
+    }
+  ]
+}

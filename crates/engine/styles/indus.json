@@ -1,0 +1,60 @@
+{
+  "id": "indus",
+  "name": "Indus",
+  "description": "Mécanique et répétitif, comme une boîte à rythmes : la machine avant l'humain.",
+  "prompt": "La batterie doit sonner comme une machine : motif identique d'une mesure à l'autre, aucune note fantôme, aucun roulement de toms, frappe constante. Grosse caisse sur chaque temps, caisse claire sèche sur 2 et 4, charleston fermé à la double croche. Sur les riffs de guitare saccadés, la grosse caisse se cale sur chaque accent du riff. Les variations se font par blocs entiers (on change de motif à une nouvelle partie), jamais par petites touches.",
+  "plan": {
+    "feel": "normal",
+    "hat": "sixteenths",
+    "kick": "four_on_floor",
+    "kick_density": 0.3,
+    "ghost_notes": false,
+    "crash": false,
+    "fill": false,
+    "fill_every": 0,
+    "intensity": 0.9
+  },
+  "examples": [
+    {
+      "situation": "Couplet, séquence de synthé ou basse répétitive",
+      "plan": {
+        "kick": "four_on_floor",
+        "hat": "sixteenths",
+        "kick_density": 0.2,
+        "crash": false,
+        "intensity": 0.85
+      }
+    },
+    {
+      "situation": "Riff de guitare saccadé, très marqué",
+      "plan": {
+        "kick": "four_on_floor",
+        "hat": "quarters",
+        "kick_density": 1.0,
+        "crash": false,
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Refrain, niveau fort",
+      "plan": {
+        "kick": "four_on_floor",
+        "hat": "open",
+        "kick_density": 0.5,
+        "crash": true,
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Passage lent et pesant",
+      "plan": {
+        "feel": "half_time",
+        "kick": "accents",
+        "kick_density": 1.0,
+        "hat": "quarters",
+        "crash": false,
+        "intensity": 1.0
+      }
+    }
+  ]
+}

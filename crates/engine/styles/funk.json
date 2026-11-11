@@ -1,0 +1,49 @@
+{
+  "id": "funk",
+  "name": "Funk",
+  "description": "Groove serré à la double croche, tout en nuances.",
+  "prompt": "Le groove passe avant la puissance. Charleston à la double croche, notes fantômes de caisse claire, grosse caisse syncopée collée à la basse. Frappe modérée : c'est le contraste entre notes fortes et notes fantômes qui fait danser. Peu de crash, peu de roulements.",
+  "plan": {
+    "feel": "normal",
+    "hat": "sixteenths",
+    "kick": "accents",
+    "kick_density": 0.9,
+    "ghost_notes": true,
+    "crash": false,
+    "fill": false,
+    "fill_every": 0,
+    "intensity": 0.6
+  },
+  "examples": [
+    {
+      "situation": "Couplet, basse syncopée, guitare en cocottes",
+      "plan": {
+        "hat": "sixteenths",
+        "kick_density": 0.9,
+        "ghost_notes": true,
+        "crash": false,
+        "intensity": 0.55
+      }
+    },
+    {
+      "situation": "Refrain plus ouvert, cuivres ou claviers tenus",
+      "plan": {
+        "hat": "open",
+        "kick_density": 0.7,
+        "ghost_notes": true,
+        "crash": true,
+        "intensity": 0.7
+      }
+    },
+    {
+      "situation": "Break où la basse joue seule",
+      "plan": {
+        "hat": "eighths",
+        "kick_density": 1.0,
+        "ghost_notes": true,
+        "crash": false,
+        "intensity": 0.5
+      }
+    }
+  ]
+}

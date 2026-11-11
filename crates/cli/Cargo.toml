@@ -4,6 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-aidrummer-engine = { version = "0.1.0", path = "../engine" }
+aidrummer-engine = { version = "0.2.0", path = "../engine" }
 hound = "3.5.1"
 serde_json = "1.0.154"

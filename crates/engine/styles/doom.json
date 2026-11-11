@@ -1,0 +1,47 @@
+{
+  "id": "doom",
+  "name": "Doom / Stoner",
+  "description": "Lent, lourd, large : chaque coup pèse.",
+  "prompt": "Laisse de l'air : peu de notes, mais chacune frappée fort. Demi-temps, grosse caisse sur les appuis du riff seulement, charleston ouvert ou ride. Pas de double pédale, pas de notes fantômes. Les roulements sont lents et rares.",
+  "plan": {
+    "feel": "half_time",
+    "hat": "open",
+    "kick": "accents",
+    "kick_density": 0.5,
+    "ghost_notes": false,
+    "crash": true,
+    "fill": false,
+    "fill_every": 0,
+    "intensity": 1.0
+  },
+  "examples": [
+    {
+      "situation": "Riff lent, accords plaqués",
+      "plan": {
+        "feel": "half_time",
+        "hat": "open",
+        "kick_density": 0.5,
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Riff qui roule, plus groovy",
+      "plan": {
+        "feel": "normal",
+        "hat": "ride",
+        "kick_density": 0.7,
+        "intensity": 0.9
+      }
+    },
+    {
+      "situation": "Passage calme avant l'explosion",
+      "plan": {
+        "feel": "half_time",
+        "hat": "quarters",
+        "kick_density": 0.2,
+        "crash": false,
+        "intensity": 0.5
+      }
+    }
+  ]
+}

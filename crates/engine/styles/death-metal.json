@@ -1,0 +1,58 @@
+{
+  "id": "death-metal",
+  "name": "Death Metal",
+  "description": "Extrême : double pédale en continu, blast beats, frappe au maximum.",
+  "prompt": "La frappe est toujours au maximum et rien n'est nuancé : pas de notes fantômes. La double pédale en doubles croches est le jeu de base. Sur les riffs en trémolo et les passages les plus intenses, joue un blast beat. Sur les riffs lents et lourds, passe en demi-temps avec la grosse caisse collée aux accents des guitares. La ride ou le charleston ouvert remplacent le charleston fermé. Les changements de partie sont marqués par un roulement et un crash.",
+  "plan": {
+    "feel": "normal",
+    "hat": "open",
+    "kick": "double_bass",
+    "kick_density": 1.0,
+    "ghost_notes": false,
+    "crash": true,
+    "fill": false,
+    "fill_every": 4,
+    "intensity": 1.0
+  },
+  "examples": [
+    {
+      "situation": "Riff en trémolo, niveau au maximum",
+      "plan": {
+        "feel": "blast",
+        "hat": "ride",
+        "intensity": 1.0,
+        "fill_every": 4
+      }
+    },
+    {
+      "situation": "Riff mid-tempo en palm mute",
+      "plan": {
+        "feel": "normal",
+        "kick": "double_bass",
+        "hat": "open",
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Riff rapide en croches, façon thrash",
+      "plan": {
+        "feel": "double_time",
+        "kick": "four_on_floor",
+        "hat": "eighths",
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Passage lent et lourd, accords plaqués",
+      "plan": {
+        "feel": "half_time",
+        "kick": "accents",
+        "kick_density": 1.0,
+        "hat": "open",
+        "fill": true,
+        "fill_every": 0,
+        "intensity": 1.0
+      }
+    }
+  ]
+}

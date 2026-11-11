@@ -279,6 +279,21 @@ pub enum Feel {
     HalfTime,
     /// Caisse claire sur chaque contretemps : la batterie paraît deux fois plus rapide.
     DoubleTime,
+    /// Blast beat : grosse caisse et caisse claire en alternance, case après case.
+    Blast,
+}
+
+/// Comment la grosse caisse est placée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Kick {
+    /// Sur le premier temps et sur les accents du morceau, selon `kick_density`.
+    #[default]
+    Accents,
+    /// Sur chaque temps, plus les accents du morceau selon `kick_density`.
+    FourOnFloor,
+    /// Double pédale : sur chaque case de la grille (doubles croches en continu).
+    DoubleBass,
 }
 
 /// Ce que joue la main droite.
@@ -311,6 +326,7 @@ pub struct DrumPlan {
     pub comment: String,
     pub feel: Feel,
     pub hat: Hat,
+    pub kick: Kick,
     /// De 0 à 1 : 0 = grosse caisse sur le premier temps seulement, 0,5 = sur les accents forts,
     /// 1 = sur tous les accents du morceau.
     pub kick_density: f32,
@@ -320,6 +336,8 @@ pub struct DrumPlan {
     pub crash: bool,
     /// Roulement sur le dernier temps de la dernière mesure.
     pub fill: bool,
+    /// Roulement toutes les N mesures, suivi d'un crash sur la mesure d'après. 0 = jamais.
+    pub fill_every: u8,
     /// De 0 à 1 : force de frappe générale.
     pub intensity: f32,
 }
@@ -331,10 +349,12 @@ impl Default for DrumPlan {
             comment: String::new(),
             feel: Feel::Normal,
             hat: Hat::Eighths,
+            kick: Kick::Accents,
             kick_density: 0.5,
             ghost_notes: false,
             crash: true,
             fill: false,
+            fill_every: 0,
             intensity: 0.8,
         }
     }
@@ -353,6 +373,43 @@ impl DrumPlan {
         self.kick_density = unit(self.kick_density);
         self.intensity = unit(self.intensity);
         self
+    }
+
+    /// Les choix en une ligne, pour le journal.
+    pub fn summary(&self) -> String {
+        let yes_no = |value: bool| if value { "oui" } else { "non" };
+        format!(
+            "pulsation : {} · main droite : {} · grosse caisse : {} (densité {:.1}) · notes fantômes : {} · crash : {} · roulement : {} · intensité : {:.1}",
+            match self.feel {
+                Feel::Normal => "caisse claire sur 2 et 4",
+                Feel::HalfTime => "demi-temps",
+                Feel::DoubleTime => "tempo doublé",
+                Feel::Blast => "blast beat",
+            },
+            match self.hat {
+                Hat::Eighths => "charleston à la croche",
+                Hat::Sixteenths => "charleston à la double croche",
+                Hat::Quarters => "charleston à la noire",
+                Hat::Open => "charleston ouvert",
+                Hat::Ride => "ride",
+                Hat::None => "aucune",
+            },
+            match self.kick {
+                Kick::Accents => "sur les accents",
+                Kick::FourOnFloor => "sur chaque temps",
+                Kick::DoubleBass => "double pédale",
+            },
+            self.kick_density,
+            yes_no(self.ghost_notes),
+            yes_no(self.crash),
+            match (self.fill, self.fill_every) {
+                (false, 0) => "non".to_string(),
+                (true, 0) => "à la fin".to_string(),
+                (false, every) => format!("toutes les {every} mesures"),
+                (true, every) => format!("toutes les {every} mesures et à la fin"),
+            },
+            self.intensity,
+        )
     }
 }
 
@@ -383,6 +440,7 @@ pub fn write_drums(grid: &Grid, accents: &[AccentMap], plan: &DrumPlan) -> Vec<D
         Feel::Normal => on_beat(slot) && (slot / per_beat) % 2 == 1,
         Feel::HalfTime => on_beat(slot) && (slot / per_beat) % 4 == 2,
         Feel::DoubleTime => half_beat > 0 && slot % per_beat == half_beat,
+        Feel::Blast => slot % 2 == 1,
     };
     let hat_note = match plan.hat {
         Hat::Eighths | Hat::Sixteenths | Hat::Quarters => Some(notes::HAT_CLOSED),
@@ -406,13 +464,19 @@ pub fn write_drums(grid: &Grid, accents: &[AccentMap], plan: &DrumPlan) -> Vec<D
     let (first, last) = (sounding.first().copied(), sounding.last().copied());
     let mut part = Vec::new();
 
-    for &index in &sounding {
+    let every = plan.fill_every as usize;
+    for (position, &index) in sounding.iter().enumerate() {
         let (bar, slots) = &combined[index];
         let bar_qn = *bar as f64 * grid.beats_per_bar;
         let at = |slot: usize| bar_qn + slot as f64 / per_beat as f64;
-        // Le roulement occupe le dernier temps entier de la dernière mesure.
-        let fill_from = (plan.fill && Some(index) == last && slots.len() >= per_beat)
+        // Le roulement occupe le dernier temps entier de la mesure : la dernière du passage,
+        // et une mesure sur `fill_every`.
+        let periodic = every > 0 && (position + 1).is_multiple_of(every);
+        let fill_from = (((plan.fill && Some(index) == last) || periodic)
+            && slots.len() >= per_beat)
             .then(|| slots.len() - per_beat);
+        // Un roulement régulier retombe sur un crash.
+        let after_fill = every > 0 && position > 0 && position.is_multiple_of(every);
 
         for (slot, &strength) in slots.iter().enumerate() {
             if let Some(start) = fill_from.filter(|&start| slot >= start) {
@@ -426,19 +490,44 @@ pub fn write_drums(grid: &Grid, accents: &[AccentMap], plan: &DrumPlan) -> Vec<D
                 });
                 continue;
             }
-            if on_backbeat(slot) {
+            let snare = on_backbeat(slot);
+            let on_accent = slot == 0 || strength >= kick_threshold;
+            let kick = if plan.feel == Feel::Blast {
+                slot.is_multiple_of(2)
+            } else {
+                match plan.kick {
+                    Kick::Accents => !snare && on_accent,
+                    Kick::FourOnFloor => on_beat(slot) || (!snare && on_accent),
+                    Kick::DoubleBass => true,
+                }
+            };
+            if snare {
                 part.push(DrumNote {
                     position_qn: at(slot),
                     note: notes::SNARE,
                     velocity: velocity(108.0),
                 });
-            } else if slot == 0 || strength >= kick_threshold {
+            }
+            if kick {
+                // Hors des accents, la double pédale et les temps « de remplissage » frappent
+                // un peu moins fort.
+                let base = if on_accent || plan.feel == Feel::Blast {
+                    96.0
+                } else {
+                    88.0
+                };
                 part.push(DrumNote {
                     position_qn: at(slot),
                     note: notes::KICK,
-                    velocity: velocity(96.0 + 24.0 * strength.clamp(0.0, 1.0)),
+                    velocity: velocity(base + 24.0 * strength.clamp(0.0, 1.0)),
                 });
-            } else if plan.ghost_notes && slot + 1 < slots.len() && on_backbeat(slot + 1) {
+            }
+            if !snare
+                && !kick
+                && plan.ghost_notes
+                && slot + 1 < slots.len()
+                && on_backbeat(slot + 1)
+            {
                 part.push(DrumNote {
                     position_qn: at(slot),
                     note: notes::SNARE,
@@ -453,7 +542,7 @@ pub fn write_drums(grid: &Grid, accents: &[AccentMap], plan: &DrumPlan) -> Vec<D
                 });
             }
         }
-        if plan.crash && Some(index) == first {
+        if (plan.crash && Some(index) == first) || after_fill {
             part.push(DrumNote {
                 position_qn: at(0),
                 note: notes::CRASH,
@@ -777,6 +866,82 @@ mod tests {
         let part = write_drums(&grid(), &[template], &DrumPlan::default());
         assert_eq!(slots_of(&part, notes::SNARE), vec![4, 12, 20, 28]);
         assert_eq!(slots_of(&part, notes::HAT_CLOSED).len(), 16);
+    }
+
+    #[test]
+    fn double_bass_plays_every_slot_and_keeps_the_snare() {
+        let map = accents(&[&[(0, 1.0)]]);
+        let plan = DrumPlan {
+            kick: Kick::DoubleBass,
+            ..DrumPlan::default()
+        };
+        let part = write_drums(&grid(), &[map], &plan);
+        assert_eq!(slots_of(&part, notes::KICK).len(), 16);
+        assert_eq!(slots_of(&part, notes::SNARE), vec![4, 12]);
+    }
+
+    #[test]
+    fn four_on_the_floor_kicks_every_beat_even_under_the_snare() {
+        let map = accents(&[&[(0, 1.0), (6, 0.9)]]);
+        let plan = DrumPlan {
+            kick: Kick::FourOnFloor,
+            ..DrumPlan::default()
+        };
+        let part = write_drums(&grid(), &[map], &plan);
+        // Les quatre temps, plus l'accent fort de la case 6.
+        assert_eq!(slots_of(&part, notes::KICK), vec![0, 4, 6, 8, 12]);
+        assert_eq!(slots_of(&part, notes::SNARE), vec![4, 12]);
+    }
+
+    #[test]
+    fn blast_alternates_kick_and_snare() {
+        let map = accents(&[&[(0, 1.0)]]);
+        let plan = DrumPlan {
+            feel: Feel::Blast,
+            ..DrumPlan::default()
+        };
+        let part = write_drums(&grid(), &[map], &plan);
+        assert_eq!(
+            slots_of(&part, notes::KICK),
+            vec![0, 2, 4, 6, 8, 10, 12, 14]
+        );
+        assert_eq!(
+            slots_of(&part, notes::SNARE),
+            vec![1, 3, 5, 7, 9, 11, 13, 15]
+        );
+    }
+
+    #[test]
+    fn regular_fills_come_every_n_bars_and_land_on_a_crash() {
+        let map = accents(&[&[(0, 1.0)], &[(0, 1.0)], &[(0, 1.0)], &[(0, 1.0)]]);
+        let plan = DrumPlan {
+            fill_every: 2,
+            ..DrumPlan::default()
+        };
+        let part = write_drums(&grid(), &[map], &plan);
+        let toms: Vec<usize> = part
+            .iter()
+            .filter(|n| piece_of(n.note) == Piece::Tom)
+            .map(|n| (n.position_qn / 4.0) as usize)
+            .collect();
+        // Roulements à la fin des mesures 2 et 4 (numéros 1 et 3).
+        assert_eq!(toms, vec![1, 1, 3, 3]);
+        // Crash au début, puis au retour du premier roulement.
+        assert_eq!(slots_of(&part, notes::CRASH), vec![0, 32]);
+    }
+
+    #[test]
+    fn summary_names_the_choices() {
+        let plan = DrumPlan {
+            feel: Feel::Blast,
+            kick: Kick::DoubleBass,
+            fill_every: 4,
+            ..DrumPlan::default()
+        };
+        let summary = plan.summary();
+        assert!(summary.contains("blast beat"), "{summary}");
+        assert!(summary.contains("double pédale"), "{summary}");
+        assert!(summary.contains("toutes les 4 mesures"), "{summary}");
     }
 
     #[test]

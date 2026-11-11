@@ -12,8 +12,8 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Mutex, OnceLock};
 
 use aidrummer_engine::{
-    advice_report, advise_at, apply_advice, ask_advice, ask_plan, list_models, selection_report,
-    Advice, AiSettings, DrumNote, DrumPlan, Feel, Hat,
+    advice_report, advise_at, apply_advice, ask_advice, ask_plan, list_models, merge_styles,
+    selection_report, Advice, AiSettings, DrumNote, DrumPlan, Style,
 };
 use fragile::Fragile;
 use project::Passage;
@@ -38,6 +38,12 @@ const LAST_ANALYSIS_FILE: &str = "derniere-analyse.json";
 const LAST_PLAN_FILE: &str = "derniere-reponse-ia.json";
 const SETTINGS_FILE: &str = "reglages-ia.json";
 const JOURNAL_FILE: &str = "journal.txt";
+/// Dossier des styles de l'utilisateur, dans `DATA_DIR`.
+const STYLES_DIR: &str = "styles";
+/// Fichier qui retient l'identifiant du style choisi.
+const STYLE_FILE: &str = "style.txt";
+/// Modèle de style à copier. Les fichiers dont le nom commence par « _ » ne sont pas lus.
+const STYLE_TEMPLATE_FILE: &str = "_modele.json";
 const JOURNAL_MAX_BYTES: u64 = 512 * 1024;
 /// Variable d'environnement qui peut porter la clé d'accès à la place du fichier de réglages.
 const API_KEY_ENV: &str = "AIDRUMMER_API_KEY";
@@ -57,9 +63,10 @@ enum Action {
     Advice,
     ApplyAdvice,
     AiAdvice,
+    NextStyle,
 }
 
-const ACTION_TABLE: [(Action, &str, &str); 11] = [
+const ACTION_TABLE: [(Action, &str, &str); 12] = [
     (
         Action::Summary,
         "AIDRUMMER_PROJECT_SUMMARY",
@@ -114,6 +121,11 @@ const ACTION_TABLE: [(Action, &str, &str); 11] = [
         Action::AiAdvice,
         "AIDRUMMER_AI_ADVICE",
         "AI Drummer : avis de l'IA sur la batterie de la sélection",
+    ),
+    (
+        Action::NextStyle,
+        "AIDRUMMER_NEXT_STYLE",
+        "AI Drummer : style de batterie suivant",
     ),
 ];
 
@@ -197,12 +209,7 @@ impl HookCommand for Actions {
         match action {
             Action::Summary => print_project_summary(reaper),
             Action::Analyze => print_selection_analysis(reaper),
-            Action::Sketch => {
-                let result = project::prepare_passage(reaper).and_then(|passage| {
-                    project::write_passage(reaper, &passage, &DrumPlan::default())
-                });
-                say(reaper, result.unwrap_or_else(|message| message));
-            }
+            Action::Sketch => write_sketch(reaper),
             Action::AiDrums => start_ai_drums(reaper, None),
             Action::AiDrumsWithInstruction => {
                 // Annuler la boîte de saisie annule la demande.
@@ -216,6 +223,7 @@ impl HookCommand for Actions {
             Action::Advice => show_advice(reaper),
             Action::ApplyAdvice => write_corrected(reaper, None),
             Action::AiAdvice => start_ai_advice(reaper, None),
+            Action::NextStyle => next_style(reaper),
         }
         true
     }
@@ -280,6 +288,133 @@ fn load_settings(reaper: &Reaper) -> Result<(AiSettings, String), String> {
     Ok((settings, file))
 }
 
+/// Les styles proposés : ceux qui sont fournis, puis ceux du dossier `AIDrummer/styles`.
+/// Un fichier illisible est signalé et laissé de côté.
+fn load_styles(reaper: &Reaper) -> Vec<Style> {
+    let directory = reaper.get_resource_path(|path| path.join(DATA_DIR).join(STYLES_DIR));
+    let directory = std::path::PathBuf::from(directory.to_string());
+    if std::fs::create_dir_all(&directory).is_err() {
+        return merge_styles(Vec::new());
+    }
+    let template = directory.join(STYLE_TEMPLATE_FILE);
+    if !template.exists() {
+        let _ = std::fs::write(&template, aidrummer_engine::styles::TEMPLATE_JSON);
+    }
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&directory)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok().map(|e| e.path()))
+                .filter(|path| {
+                    path.extension().is_some_and(|e| e == "json")
+                        && !path
+                            .file_name()
+                            .is_some_and(|name| name.to_string_lossy().starts_with('_'))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    let mut user = Vec::new();
+    for file in files {
+        let read = std::fs::read_to_string(&file)
+            .map_err(|e| e.to_string())
+            .and_then(|text| Style::from_json(&text));
+        match read {
+            Ok(style) => user.push(style),
+            Err(message) => say(
+                reaper,
+                format!("{} laissé de côté : {message}", file.display()),
+            ),
+        }
+    }
+    merge_styles(user)
+}
+
+/// L'identifiant du style choisi ; vide s'il n'y en a pas.
+fn chosen_style_id(reaper: &Reaper) -> String {
+    data_file(reaper, STYLE_FILE)
+        .ok()
+        .and_then(|file| std::fs::read_to_string(file).ok())
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Le style choisi, s'il y en a un et qu'il existe encore.
+fn current_style(reaper: &Reaper) -> Option<Style> {
+    let id = chosen_style_id(reaper);
+    if id.is_empty() {
+        return None;
+    }
+    let style = load_styles(reaper).into_iter().find(|style| style.id == id);
+    if style.is_none() {
+        say(
+            reaper,
+            format!("le style « {id} » n'existe plus : aucun style n'est appliqué."),
+        );
+    }
+    style
+}
+
+/// Retient le style choisi (identifiant vide : aucun style) et le dit.
+fn choose_style(reaper: &Reaper, id: &str) {
+    let style = load_styles(reaper).into_iter().find(|style| style.id == id);
+    let saved = data_file(reaper, STYLE_FILE).and_then(|file| {
+        std::fs::write(&file, style.as_ref().map(|s| s.id.as_str()).unwrap_or(""))
+            .map_err(|e| format!("{file} : {e}"))
+    });
+    if let Err(message) = saved {
+        return say(reaper, format!("style non enregistré : {message}"));
+    }
+    panel::set_style(style.as_ref().map(|s| s.id.as_str()).unwrap_or(""));
+    match style {
+        Some(style) => say(
+            reaper,
+            format!(
+                "style : {} — {}\n  jeu de départ : {}\n  L'ébauche l'applique tel quel ; l'IA part de là et retouche selon le passage.",
+                style.name,
+                style.description,
+                style.plan.summary()
+            ),
+        ),
+        None => say(reaper, "style : aucun. L'ébauche reprend les choix par défaut et l'IA décide librement."),
+    }
+}
+
+/// Passe au style suivant de la liste, puis à « aucun » après le dernier.
+fn next_style(reaper: &Reaper) {
+    let styles = load_styles(reaper);
+    let current = chosen_style_id(reaper);
+    let next = match styles.iter().position(|style| style.id == current) {
+        Some(index) => styles.get(index + 1),
+        None => styles.first(),
+    };
+    choose_style(reaper, next.map(|style| style.id.as_str()).unwrap_or(""));
+}
+
+/// Écrit l'ébauche de batterie : le jeu de départ du style choisi, ou les choix par défaut.
+fn write_sketch(reaper: &Reaper) {
+    let plan = current_style(reaper)
+        .map(|style| style.base_plan())
+        .unwrap_or_default();
+    let result = project::prepare_passage(reaper)
+        .and_then(|passage| project::write_passage(reaper, &passage, &plan));
+    say(
+        reaper,
+        match result {
+            Ok(written) => format!(
+                "ébauche, style : {}\n  {}\n  {written}",
+                if plan.style.is_empty() {
+                    "aucun"
+                } else {
+                    &plan.style
+                },
+                plan.summary()
+            ),
+            Err(message) => message,
+        },
+    );
+}
+
 fn show_settings(reaper: &Reaper) {
     match load_settings(reaper) {
         Ok((settings, file)) => say(
@@ -340,6 +475,7 @@ fn start_ai_drums(reaper: &Reaper, instruction: Option<String>) {
         Ok(passage) => passage,
         Err(message) => return say(reaper, message),
     };
+    let style = current_style(reaper);
     let (sender, receiver) = mpsc::channel();
     if !begin_request(reaper, receiver) {
         return;
@@ -347,13 +483,20 @@ fn start_ai_drums(reaper: &Reaper, instruction: Option<String>) {
     say(
         reaper,
         format!(
-            "demande envoyée à {} ({}). REAPER reste utilisable ; la batterie sera écrite à la réponse.",
-            settings.model, settings.base_url
+            "demande envoyée à {} ({}), style imposé : {}. REAPER reste utilisable ; la batterie sera écrite à la réponse.",
+            settings.model,
+            settings.base_url,
+            style.as_ref().map(|s| s.name.as_str()).unwrap_or("aucun"),
         ),
     );
     // L'appel peut durer des dizaines de secondes : il se fait hors du fil principal.
     std::thread::spawn(move || {
-        let plan = ask_plan(&settings, &passage.analysis, instruction.as_deref());
+        let plan = ask_plan(
+            &settings,
+            &passage.analysis,
+            style.as_ref(),
+            instruction.as_deref(),
+        );
         let _ = sender.send(Answer::Plan(plan, Box::new(passage)));
     });
 }
@@ -562,6 +705,7 @@ fn start_ai_advice(reaper: &Reaper, instruction: Option<String>) {
         Ok(set) => set,
         Err(message) => return say(reaper, message),
     };
+    let style = current_style(reaper);
     let (sender, receiver) = mpsc::channel();
     if !begin_request(reaper, receiver) {
         return;
@@ -569,14 +713,22 @@ fn start_ai_advice(reaper: &Reaper, instruction: Option<String>) {
     say(
         reaper,
         format!(
-            "avis demandé à {} sur la batterie « {} ». REAPER reste utilisable.",
-            settings.model, set.track
+            "avis demandé à {} sur la batterie « {} », style visé : {}. REAPER reste utilisable.",
+            settings.model,
+            set.track,
+            style.as_ref().map(|s| s.name.as_str()).unwrap_or("aucun"),
         ),
     );
     let findings = advice_report(&set.track, &set.advices);
     let analysis = set.passage.analysis;
     std::thread::spawn(move || {
-        let advice = ask_advice(&settings, &analysis, &findings, instruction.as_deref());
+        let advice = ask_advice(
+            &settings,
+            &analysis,
+            &findings,
+            style.as_ref(),
+            instruction.as_deref(),
+        );
         let _ = sender.send(Answer::Advice(advice));
     });
 }
@@ -593,7 +745,11 @@ fn toggle_panel(reaper: &Reaper) {
         Ok((settings, _)) => settings,
         Err(message) => return say(reaper, message),
     };
-    match panel::toggle(reaper, &settings) {
+    let styles = load_styles(reaper)
+        .into_iter()
+        .map(|style| (style.id, style.name, style.description))
+        .collect();
+    match panel::toggle(reaper, &settings, styles, &chosen_style_id(reaper)) {
         Err(message) => say(reaper, message),
         Ok(()) if panel::is_open() => say(reaper, "panneau ouvert."),
         Ok(()) => say(reaper, "panneau fermé."),
@@ -618,12 +774,8 @@ fn run_panel() {
     for command in commands {
         match command {
             panel::Command::Analyze => print_selection_analysis(reaper),
-            panel::Command::Sketch => {
-                let result = project::prepare_passage(reaper).and_then(|passage| {
-                    project::write_passage(reaper, &passage, &DrumPlan::default())
-                });
-                say(reaper, result.unwrap_or_else(|message| message));
-            }
+            panel::Command::Sketch => write_sketch(reaper),
+            panel::Command::SetStyle(id) => choose_style(reaper, &id),
             panel::Command::AiDrums(instruction) => {
                 start_ai_drums(reaper, Some(instruction).filter(|text| !text.is_empty()))
             }
@@ -655,36 +807,19 @@ fn write_ai_drums(reaper: &Reaper, plan: &DrumPlan, passage: &Passage) {
     say(
         reaper,
         format!(
-            "choix de l'IA\n  style : {}\n  {}\n  pulsation : {} · main droite : {} · densité de grosse caisse : {:.1} · notes fantômes : {} · crash : {} · roulement : {} · intensité : {:.1}\n  {}",
-            if plan.style.is_empty() { "non précisé" } else { &plan.style },
-            if plan.comment.is_empty() { "(pas de commentaire)" } else { &plan.comment },
-            match plan.feel {
-                Feel::Normal => "caisse claire sur 2 et 4",
-                Feel::HalfTime => "demi-temps",
-                Feel::DoubleTime => "tempo doublé",
+            "choix de l'IA\n  style : {}\n  {}\n  {}\n  {}",
+            if plan.style.is_empty() {
+                "non précisé"
+            } else {
+                &plan.style
             },
-            match plan.hat {
-                Hat::Eighths => "charleston à la croche",
-                Hat::Sixteenths => "charleston à la double croche",
-                Hat::Quarters => "charleston à la noire",
-                Hat::Open => "charleston ouvert",
-                Hat::Ride => "ride",
-                Hat::None => "aucune",
+            if plan.comment.is_empty() {
+                "(pas de commentaire)"
+            } else {
+                &plan.comment
             },
-            plan.kick_density,
-            oui_non(plan.ghost_notes),
-            oui_non(plan.crash),
-            oui_non(plan.fill),
-            plan.intensity,
+            plan.summary(),
             written.unwrap_or_else(|message| message),
         ),
     );
-}
-
-fn oui_non(value: bool) -> &'static str {
-    if value {
-        "oui"
-    } else {
-        "non"
-    }
 }

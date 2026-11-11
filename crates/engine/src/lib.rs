@@ -10,6 +10,7 @@ pub mod audio;
 pub mod drums;
 pub mod onsets;
 pub mod report;
+pub mod styles;
 
 pub use accents::{accent_map, template_accents, AccentMap, BarAccents, Grid, ProjectSpan};
 pub use advice::{advice_report, advise, advise_at, apply_advice, Advice, Edit};
@@ -18,10 +19,11 @@ pub use analysis::{analyze, grid_fit, GridFit, SongAnalysis};
 pub use audio::{decode_mono, Audio};
 pub use drums::{
     piece_of, read_drums, sketch_drums, write_drums, DrumLane, DrumNote, DrumPlan, DrumReading,
-    Feel, Hat, Piece,
+    Feel, Hat, Kick, Piece,
 };
 pub use onsets::{detect_onsets, detect_onsets_after_preroll, Onset};
 pub use report::{clock, selection_report, span_label, SelectionAnalysis, TrackAccents};
+pub use styles::{builtin_styles, merge_styles, overlay_plan, Style, StyleExample};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {

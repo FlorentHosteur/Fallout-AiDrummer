@@ -146,7 +146,7 @@ Deux façons de lancer AI Drummer : la liste des actions de REAPER (*Actions →
 
 ### Le panneau
 
-Le panneau regroupe tout dans une fenêtre ancrable : les boutons ANALYSER, ÉBAUCHE et BATTERIE AVEC L'IA, la consigne pour l'IA, ses réglages (adresse, modèle, clé, liste des modèles), les conseils sur la batterie existante avec leurs cases à cocher, et un journal qui remplace la console.
+Le panneau regroupe tout dans une fenêtre ancrable : les boutons ANALYSER, ÉBAUCHE et BATTERIE AVEC L'IA, le choix du style (boutons `<` et `>`), la consigne pour l'IA, ses réglages (adresse, modèle, clé, liste des modèles), les conseils sur la batterie existante avec leurs cases à cocher, et un journal qui remplace la console.
 
 Il a besoin de l'extension ReaImGui, version 0.10 ou plus récente :
 
@@ -197,6 +197,40 @@ Le détail complet (accents mesure par mesure, niveau sonore de chaque mesure) e
 - Les notes sont rangées par élément d'après la table Toontrack (EZdrummer 3, Superior Drummer 3) complétée par General MIDI. Les articulations de charleston de cette table n'ont pas été vérifiées dans Superior Drummer ; une note inconnue est listée à part plutôt que devinée.
 - L'analyse ne modifie jamais le projet.
 
+### Les styles
+
+Un style impose une façon de jouer. Il fait deux choses :
+
+- **sans IA**, l'ébauche applique le jeu de départ du style au lieu des choix par défaut ;
+- **avec l'IA**, la pré-consigne du style (ses règles de jeu, son jeu de départ et des exemples « situation → choix ») est ajoutée aux instructions envoyées. L'IA part du jeu de départ et ne retouche que ce que le passage ou ta consigne demandent ; un choix qu'elle ne donne pas garde la valeur du style. L'avis de l'IA sur une batterie existante est lui aussi demandé pour ce style.
+
+Styles fournis :
+
+| Style | Jeu de départ |
+|---|---|
+| Rock | Caisse claire sur 2 et 4, charleston à la croche, roulement de fin. |
+| Punk | Frappe au maximum, grosse caisse dense, sans nuances. |
+| Funk | Charleston à la double croche, notes fantômes, grosse caisse syncopée, frappe modérée. |
+| Metal | Grosse caisse collée aux riffs, roulement toutes les 4 mesures. |
+| Death Metal | Double pédale en continu, charleston ouvert, frappe au maximum ; blast beat sur les passages les plus intenses. |
+| Indus | Grosse caisse sur chaque temps, charleston à la double croche, motif mécanique sans roulement. |
+| Prog | Ride, notes fantômes, grosse caisse qui suit les accents décalés, roulement toutes les 4 mesures. |
+| Doom / Stoner | Demi-temps, charleston ouvert, peu de notes frappées fort. |
+
+**Choisir un style.** Dans le panneau, section STYLE, avec les boutons `<` et `>`. Sans le panneau, l'action « AI Drummer : style de batterie suivant » passe au style suivant et l'affiche (après le dernier : aucun style). Le choix est gardé d'une session à l'autre dans `AIDrummer/style.txt`.
+
+**Écrire ton propre style.** Le dossier `AIDrummer/styles`, dans le dossier de ressources de REAPER, contient un modèle, `_modele.json` (le style Death Metal). Copie-le sous un autre nom sans le « _ » de tête, par exemple `black-metal.json`, et modifie-le :
+
+| Champ | Sens |
+|---|---|
+| `id` | Identifiant court. S'il reprend celui d'un style fourni (`rock`, `punk`, `funk`, `metal`, `death-metal`, `indus`, `prog`, `doom`), ton fichier le remplace. |
+| `name`, `description` | Le nom et la phrase affichés. |
+| `prompt` | La pré-consigne : les règles de jeu du style, en phrases, telles qu'on les dirait à un batteur. |
+| `plan` | Le jeu de départ. Mêmes champs que la réponse de l'IA : `feel` (`normal`, `half_time`, `double_time`, `blast`), `hat` (`eighths`, `sixteenths`, `quarters`, `open`, `ride`, `none`), `kick` (`accents`, `four_on_floor`, `double_bass`), `kick_density` (0 à 1), `ghost_notes`, `crash`, `fill`, `fill_every` (roulement toutes les N mesures, 0 = jamais), `intensity` (0 à 1). |
+| `examples` | Des exemples à suivre : une `situation` en une phrase et le `plan` qui lui va (seuls les champs qui changent). |
+
+Les fichiers sont relus à chaque action ; un fichier illisible est signalé dans le journal et laissé de côté. Les styles fournis sont dans [crates/engine/styles](crates/engine/styles).
+
 ### Écrire une ébauche de batterie
 
 Avec une sélection de temps, lance « AI Drummer : écrire une ébauche de batterie sur la sélection ». L'extension crée une piste « AI Drummer » (si elle n'existe pas) et y pose un item MIDI sur la sélection :
@@ -208,11 +242,13 @@ Avec une sélection de temps, lance « AI Drummer : écrire une ébauche de batt
 
 Les notes écrites (36, 38, 42, 49) sont communes à General MIDI et à la table Toontrack. La piste n'a pas d'instrument : pose ta batterie virtuelle dessus, ou glisse l'item sur ta piste de batterie. Une seule annulation (*Édition → Annuler*) retire tout.
 
+Avec un style choisi, ces choix par défaut sont remplacés par le jeu de départ du style (double pédale, charleston ouvert et roulements réguliers en Death Metal, par exemple). Les roulements ajoutent les notes 45 et 43 (toms).
+
 C'est un point de départ à retoucher, fait de règles simples. Pour un jeu choisi selon le morceau, voir « Batterie avec l'IA ».
 
 ### Batterie avec l'IA
 
-L'IA ne reçoit pas l'audio et n'écrit pas les notes. Elle reçoit le compte rendu chiffré du passage (celui de l'analyse, plus le niveau sonore par mesure) et choisit comment jouer : pulsation normale, demi-temps ou tempo doublé ; charleston, charleston ouvert ou ride ; densité de grosse caisse ; notes fantômes ; crash ; roulement de fin ; intensité. Le moteur écrit ensuite les notes, grosse caisse calée sur les accents du morceau.
+L'IA ne reçoit pas l'audio et n'écrit pas les notes. Elle reçoit le compte rendu chiffré du passage (celui de l'analyse, plus le niveau sonore par mesure) et choisit comment jouer : pulsation normale, demi-temps, tempo doublé ou blast beat ; charleston, charleston ouvert ou ride ; grosse caisse sur les accents, sur chaque temps ou en double pédale, et sa densité ; notes fantômes ; crash ; roulement de fin ou toutes les N mesures ; intensité. Si un style est choisi, elle part du jeu de départ de ce style (voir « Les styles »). Le moteur écrit ensuite les notes, grosse caisse calée sur les accents du morceau.
 
 **Réglages.** Lance « AI Drummer : réglages de l'IA ». La console donne le chemin du fichier `AIDrummer/reglages-ia.json` (créé au premier appel) dans le dossier de ressources de REAPER. Ouvre-le avec un éditeur de texte et complète-le :
 
@@ -312,7 +348,7 @@ Un test est volontairement ignoré : il documente l'imprécision de la grille de
 
 | Dossier | Rôle |
 |---|---|
-| `crates/engine` | Le moteur : décodage audio, détection d'attaques, carte d'accents, lecture, écriture et conseils de batterie, appel à l'IA. Ne dépend pas de REAPER, se teste seul. |
+| `crates/engine` | Le moteur : décodage audio, détection d'attaques, carte d'accents, lecture, écriture et conseils de batterie, styles (`crates/engine/styles`), appel à l'IA. Ne dépend pas de REAPER, se teste seul. |
 | `crates/cli` | La commande `aidrummer`, pour essayer le moteur sans REAPER. |
 | `crates/reaper-ext` | L'extension chargée par REAPER : actions, lecture et écriture du projet, panneau. Elle s'appuie sur [reaper-rs](https://github.com/helgoboss/reaper-rs) et, pour le panneau, sur [ReaImGui](https://github.com/cfillion/reaimgui). |
 | `scripts` | Compilation et installation dans REAPER. |

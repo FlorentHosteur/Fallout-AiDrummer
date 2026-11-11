@@ -1,0 +1,60 @@
+{
+  "id": "metal",
+  "name": "Metal",
+  "description": "Heavy et thrash : puissant, précis, collé aux riffs.",
+  "prompt": "La grosse caisse suit le riff de guitare note pour note sur les passages en palm mute. Caisse claire très franche sur 2 et 4. Double pédale sur les refrains et les fins de partie, tempo doublé sur les riffs rapides. Pas de notes fantômes. Les roulements sont nets et retombent sur un crash.",
+  "plan": {
+    "feel": "normal",
+    "hat": "eighths",
+    "kick": "accents",
+    "kick_density": 0.9,
+    "ghost_notes": false,
+    "crash": true,
+    "fill": false,
+    "fill_every": 4,
+    "intensity": 0.9
+  },
+  "examples": [
+    {
+      "situation": "Riff en palm mute, tempo moyen",
+      "plan": {
+        "feel": "normal",
+        "kick": "accents",
+        "kick_density": 1.0,
+        "hat": "eighths",
+        "intensity": 0.9
+      }
+    },
+    {
+      "situation": "Riff rapide en croches, façon thrash",
+      "plan": {
+        "feel": "double_time",
+        "kick": "four_on_floor",
+        "kick_density": 0.5,
+        "hat": "eighths",
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Refrain large, accords tenus",
+      "plan": {
+        "feel": "normal",
+        "kick": "double_bass",
+        "hat": "ride",
+        "crash": true,
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Break lourd avant la reprise",
+      "plan": {
+        "feel": "half_time",
+        "kick": "accents",
+        "kick_density": 1.0,
+        "hat": "open",
+        "fill": true,
+        "intensity": 1.0
+      }
+    }
+  ]
+}

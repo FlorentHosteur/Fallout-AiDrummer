@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 use crate::drums::DrumPlan;
 use crate::report::{selection_report, SelectionAnalysis};
+use crate::styles::{overlay_plan, Style};
 
 pub const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 pub const OPENAI_URL: &str = "https://api.openai.com/v1";
@@ -98,16 +99,20 @@ choix : la grosse caisse sera calée sur les accents du morceau.
 Réponds uniquement par un objet JSON, sans texte autour, avec ces champs :
 - \"style\" : le style visé, en quelques mots, en français ;
 - \"comment\" : deux phrases au plus, en français, qui expliquent tes choix au musicien ;
-- \"feel\" : \"normal\" (caisse claire sur 2 et 4), \"half_time\" (caisse claire sur 3) ou \
-\"double_time\" (caisse claire sur chaque contretemps) ;
+- \"feel\" : \"normal\" (caisse claire sur 2 et 4), \"half_time\" (caisse claire sur 3), \
+\"double_time\" (caisse claire sur chaque contretemps) ou \"blast\" (blast beat : grosse caisse \
+et caisse claire en alternance à la double croche) ;
 - \"hat\" : \"eighths\" (charleston fermé à la croche), \"sixteenths\" (à la double croche), \
 \"quarters\" (à la noire), \"open\" (charleston ouvert à la croche), \"ride\" (ride à la croche) \
 ou \"none\" ;
+- \"kick\" : \"accents\" (grosse caisse sur les accents du morceau), \"four_on_floor\" (sur \
+chaque temps, plus les accents) ou \"double_bass\" (double pédale en doubles croches continues) ;
 - \"kick_density\" : nombre de 0 à 1 ; 0 = grosse caisse sur le premier temps seulement, \
 0.5 = sur les accents forts, 1 = sur tous les accents ;
 - \"ghost_notes\" : true ou false, notes fantômes de caisse claire ;
 - \"crash\" : true ou false, crash sur le premier temps du passage ;
 - \"fill\" : true ou false, roulement à la fin du passage ;
+- \"fill_every\" : nombre entier ; roulement toutes les N mesures, suivi d'un crash (0 = jamais) ;
 - \"intensity\" : nombre de 0 à 1, force de frappe générale.
 
 Si le musicien donne une consigne, elle passe avant ton propre goût.";
@@ -139,17 +144,33 @@ pub fn user_prompt(analysis: &SelectionAnalysis, instruction: Option<&str>) -> S
     text
 }
 
+/// Les instructions données à l'IA pour choisir un plan : les instructions générales, puis la
+/// pré-consigne du style s'il y en a un.
+pub fn plan_system_prompt(style: Option<&Style>) -> String {
+    match style {
+        Some(style) => format!("{SYSTEM_PROMPT}\n\n{}", style.preprompt()),
+        None => SYSTEM_PROMPT.to_string(),
+    }
+}
+
 /// Lit le plan de batterie dans la réponse de l'IA. Tolère du texte autour de l'objet JSON
 /// (certaines IA l'entourent de phrases ou d'une clôture de code).
 pub fn parse_plan(answer: &str) -> Result<DrumPlan, String> {
+    parse_plan_on(answer, &DrumPlan::default())
+}
+
+/// Comme `parse_plan`, mais un champ absent de la réponse garde la valeur de `base` (le jeu de
+/// départ du style) au lieu de la valeur par défaut.
+pub fn parse_plan_on(answer: &str, base: &DrumPlan) -> Result<DrumPlan, String> {
     let (Some(start), Some(end)) = (answer.find('{'), answer.rfind('}')) else {
         return Err(format!(
             "la réponse de l'IA ne contient pas d'objet JSON : « {} »",
             excerpt(answer)
         ));
     };
-    serde_json::from_str::<DrumPlan>(&answer[start..=end])
-        .map(DrumPlan::clamped)
+    serde_json::from_str::<Value>(&answer[start..=end])
+        .map_err(|e| e.to_string())
+        .and_then(|changes| overlay_plan(base, &changes))
         .map_err(|e| {
             format!(
                 "réponse de l'IA inutilisable ({e}) : « {} »",
@@ -158,18 +179,23 @@ pub fn parse_plan(answer: &str) -> Result<DrumPlan, String> {
         })
 }
 
-/// Demande à l'IA comment jouer le passage. Bloque jusqu'à la réponse : à appeler hors du fil
-/// principal de REAPER.
+/// Demande à l'IA comment jouer le passage, dans le style choisi s'il y en a un. Bloque jusqu'à
+/// la réponse : à appeler hors du fil principal de REAPER.
 pub fn ask_plan(
     settings: &AiSettings,
     analysis: &SelectionAnalysis,
+    style: Option<&Style>,
     instruction: Option<&str>,
 ) -> Result<DrumPlan, String> {
-    parse_plan(&chat(
-        settings,
-        SYSTEM_PROMPT,
-        &user_prompt(analysis, instruction),
-    )?)
+    let base = style.map(Style::base_plan).unwrap_or_default();
+    parse_plan_on(
+        &chat(
+            settings,
+            &plan_system_prompt(style),
+            &user_prompt(analysis, instruction),
+        )?,
+        &base,
+    )
 }
 
 const ADVICE_PROMPT: &str = "\
@@ -187,17 +213,23 @@ tiret, sans titre ni mise en forme. Si le musicien pose une question ou donne un
 réponds-y d'abord.";
 
 /// Demande à l'IA son avis sur la batterie existante du passage. `findings` : les conseils déjà
-/// tirés par le moteur, en texte. Bloque jusqu'à la réponse.
+/// tirés par le moteur, en texte ; `style` : le style visé, s'il y en a un. Bloque jusqu'à la
+/// réponse.
 pub fn ask_advice(
     settings: &AiSettings,
     analysis: &SelectionAnalysis,
     findings: &str,
+    style: Option<&Style>,
     instruction: Option<&str>,
 ) -> Result<String, String> {
     let mut user = user_prompt(analysis, instruction);
     user.push_str("\nRemarques du programme :\n");
     user.push_str(findings);
-    let answer = chat(settings, ADVICE_PROMPT, &user)?;
+    let system = match style {
+        Some(style) => format!("{ADVICE_PROMPT}\n\n{}", style.advice_context()),
+        None => ADVICE_PROMPT.to_string(),
+    };
+    let answer = chat(settings, &system, &user)?;
     let answer = answer.trim();
     if answer.is_empty() {
         return Err("l'IA a répondu par un texte vide".to_string());
@@ -288,7 +320,8 @@ mod tests {
 
     use super::*;
     use crate::accents::Grid;
-    use crate::drums::{Feel, Hat};
+    use crate::drums::{Feel, Hat, Kick};
+    use crate::styles::builtin_styles;
 
     fn analysis() -> SelectionAnalysis {
         SelectionAnalysis {
@@ -363,7 +396,13 @@ mod tests {
                 r#"{"style":"rock lourd","feel":"half_time","hat":"ride","kick_density":0.9,"fill":true}"#,
             ),
         );
-        let plan = ask_plan(&settings, &analysis(), Some("plus lourd sur le refrain")).unwrap();
+        let plan = ask_plan(
+            &settings,
+            &analysis(),
+            None,
+            Some("plus lourd sur le refrain"),
+        )
+        .unwrap();
         assert_eq!(plan.feel, Feel::HalfTime);
         assert_eq!(plan.hat, Hat::Ride);
         assert!(plan.fill);
@@ -386,6 +425,51 @@ mod tests {
         assert!(request.contains("plus lourd sur le refrain"), "{request}");
     }
 
+    fn style(id: &str) -> Style {
+        builtin_styles().into_iter().find(|s| s.id == id).unwrap()
+    }
+
+    #[test]
+    fn a_style_is_sent_before_the_passage_and_fills_what_the_ai_leaves_out() {
+        // L'IA ne retouche que la pulsation : le reste vient du jeu de départ du style.
+        let (settings, request) = fake_provider(
+            "200 OK",
+            completion(r#"{"feel":"blast","comment":"Trémolo : blast."}"#),
+        );
+        let death = style("death-metal");
+        let plan = ask_plan(&settings, &analysis(), Some(&death), None).unwrap();
+        assert_eq!(plan.feel, Feel::Blast);
+        assert_eq!(plan.kick, Kick::DoubleBass);
+        assert_eq!(plan.hat, Hat::Open);
+        assert_eq!(plan.fill_every, 4);
+        assert_eq!(plan.intensity, 1.0);
+        assert_eq!(plan.style, "Death Metal");
+        assert_eq!(plan.comment, "Trémolo : blast.");
+
+        let request = request.recv().unwrap();
+        // Le corps est du JSON : les accents y sont échappés ou non selon l'encodeur.
+        assert!(request.contains("Death Metal"), "{request}");
+        assert!(request.contains("double_bass"), "{request}");
+        assert!(request.contains("Jeu de d"), "{request}");
+    }
+
+    #[test]
+    fn without_a_style_the_instructions_stay_general() {
+        assert!(!plan_system_prompt(None).contains("Style imposé"));
+        let with = plan_system_prompt(Some(&style("indus")));
+        assert!(with.starts_with(SYSTEM_PROMPT));
+        assert!(with.contains("Style imposé par le musicien : Indus."));
+    }
+
+    #[test]
+    fn advice_is_asked_for_the_chosen_style() {
+        let (settings, request) = fake_provider("200 OK", completion("- Ajoute un blast."));
+        let death = style("death-metal");
+        ask_advice(&settings, &analysis(), "rien", Some(&death), None).unwrap();
+        let request = request.recv().unwrap();
+        assert!(request.contains("vise le style Death Metal"), "{request}");
+    }
+
     #[test]
     fn advice_request_carries_the_findings_and_returns_the_text() {
         let (settings, request) = fake_provider(
@@ -396,6 +480,7 @@ mod tests {
             &settings,
             &analysis(),
             "1. Appuyer 2 accents forts",
+            None,
             Some("trop chargé ?"),
         )
         .unwrap();
@@ -415,7 +500,7 @@ mod tests {
             "401 Unauthorized",
             r#"{"error":{"message":"No auth credentials found"}}"#.to_string(),
         );
-        let error = ask_plan(&settings, &analysis(), None).unwrap_err();
+        let error = ask_plan(&settings, &analysis(), None, None).unwrap_err();
         assert!(
             error.contains("401") && error.contains("api_key"),
             "{error}"
@@ -445,7 +530,7 @@ mod tests {
             model: String::new(),
             ..AiSettings::default()
         };
-        assert!(ask_plan(&settings, &analysis(), None)
+        assert!(ask_plan(&settings, &analysis(), None, None)
             .unwrap_err()
             .contains("model"));
     }
@@ -457,7 +542,7 @@ mod tests {
             model: "m".to_string(),
             api_key: String::new(),
         };
-        assert!(ask_plan(&settings, &analysis(), None)
+        assert!(ask_plan(&settings, &analysis(), None, None)
             .unwrap_err()
             .contains("connexion"));
     }

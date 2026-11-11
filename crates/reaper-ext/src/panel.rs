@@ -99,6 +99,7 @@ struct Api {
     first_use: c_int,
     password: c_int,
     child_borders: c_int,
+    text_color: c_int,
 }
 
 impl Api {
@@ -191,6 +192,7 @@ impl Api {
                 first_use: constant(c"Cond_FirstUseEver")?,
                 password: constant(c"InputTextFlags_Password")?,
                 child_borders: constant(c"ChildFlags_Borders")?,
+                text_color: constant(c"Col_Text")?,
             })
         }
     }
@@ -253,6 +255,8 @@ pub enum Command {
     AiAdvice(String),
     /// Écrire la copie corrigée avec les conseils cochés (numéros à partir de 0).
     ApplyAdvice(Vec<usize>),
+    /// Choisir un style par son identifiant ; vide pour aucun.
+    SetStyle(String),
 }
 
 struct Panel {
@@ -264,6 +268,10 @@ struct Panel {
     model: TextField,
     api_key: TextField,
     models: Vec<String>,
+    /// Les styles proposés : (identifiant, nom, description). Le premier est « aucun ».
+    styles: Vec<(String, String, String)>,
+    /// Le style choisi, par sa place dans `styles`.
+    style: usize,
     /// Les conseils en cours : (titre, coché).
     advice: Vec<(String, bool)>,
     /// Nombre de lignes du journal déjà affichées : sert à suivre les nouvelles lignes.
@@ -294,7 +302,12 @@ pub fn is_open() -> bool {
 }
 
 /// Ouvre le panneau, ou le ferme s'il est ouvert.
-pub fn toggle(reaper: &Reaper, settings: &AiSettings) -> Result<(), String> {
+pub fn toggle(
+    reaper: &Reaper,
+    settings: &AiSettings,
+    styles: Vec<(String, String, String)>,
+    chosen_style: &str,
+) -> Result<(), String> {
     if is_open() {
         PANEL_STATE.with(|state| *state.borrow_mut() = None);
         return Ok(());
@@ -310,8 +323,20 @@ pub fn toggle(reaper: &Reaper, settings: &AiSettings) -> Result<(), String> {
     if let Some(error) = api.take_error() {
         return Err(format!("ReaImGui : {error}"));
     }
+    let mut all_styles = vec![(
+        String::new(),
+        "Aucun".to_string(),
+        "Choix par défaut ; l'IA décide librement.".to_string(),
+    )];
+    all_styles.extend(styles);
+    let style = all_styles
+        .iter()
+        .position(|(id, _, _)| id == chosen_style)
+        .unwrap_or(0);
     let panel = Panel {
         api,
+        styles: all_styles,
+        style,
         context,
         font,
         instruction: TextField::new(""),
@@ -331,6 +356,19 @@ pub fn set_models(models: Vec<String>) {
     PANEL_STATE.with(|state| {
         if let Some(panel) = state.borrow_mut().as_mut() {
             panel.models = models;
+        }
+    });
+}
+
+/// Montre dans le panneau le style choisi ailleurs (par l'action « style suivant »).
+pub fn set_style(id: &str) {
+    PANEL_STATE.with(|state| {
+        if let Some(panel) = state.borrow_mut().as_mut() {
+            panel.style = panel
+                .styles
+                .iter()
+                .position(|(style, _, _)| style == id)
+                .unwrap_or(0);
         }
     });
 }
@@ -431,6 +469,30 @@ impl Panel {
             if busy {
                 same_line();
                 dim(c"... l'IA réfléchit");
+            }
+
+            (api.separator_text)(ctx, c"STYLE".as_ptr());
+            let count = self.styles.len();
+            let mut moved = None;
+            if button(c"<##style") {
+                moved = Some((self.style + count - 1) % count);
+            }
+            same_line();
+            if button(c">##style") {
+                moved = Some((self.style + 1) % count);
+            }
+            same_line();
+            let (_, name, description) = &self.styles[self.style];
+            let name = c_string(&name.to_uppercase());
+            (api.text_colored)(ctx, GREEN as c_int, name.as_ptr());
+            let description = c_string(description);
+            (api.push_style_color)(ctx, api.text_color, GREEN_DIM as c_int);
+            (api.text_wrapped)(ctx, description.as_ptr());
+            let mut one = 1 as c_int;
+            (api.pop_style_color)(ctx, &mut one);
+            dim(c"L'ébauche applique le style ; l'IA part de là et retouche.");
+            if let Some(index) = moved {
+                commands.push(Command::SetStyle(self.styles[index].0.clone()));
             }
 
             (api.separator_text)(ctx, c"CONSIGNE POUR L'IA (facultative)".as_ptr());

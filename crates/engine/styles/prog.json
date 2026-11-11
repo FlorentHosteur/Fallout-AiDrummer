@@ -1,0 +1,61 @@
+{
+  "id": "prog",
+  "name": "Prog",
+  "description": "Rock et metal progressifs : jeu détaillé, syncopé, qui évolue au fil du morceau.",
+  "prompt": "La batterie commente le morceau : la grosse caisse suit de près les accents des riffs, même décalés, et la caisse claire est enrichie de notes fantômes. Préfère la ride au charleston sur les passages ouverts. Fais évoluer le jeu d'une partie à l'autre (main droite, densité, intensité) plutôt que de répéter le même motif. Roulements réguliers, toutes les quatre mesures. Garde de la dynamique : tout n'est pas joué fort.",
+  "plan": {
+    "feel": "normal",
+    "hat": "ride",
+    "kick": "accents",
+    "kick_density": 0.8,
+    "ghost_notes": true,
+    "crash": true,
+    "fill": false,
+    "fill_every": 4,
+    "intensity": 0.7
+  },
+  "examples": [
+    {
+      "situation": "Couplet calme, arpèges ou guitare claire",
+      "plan": {
+        "hat": "eighths",
+        "kick_density": 0.5,
+        "ghost_notes": true,
+        "crash": false,
+        "fill_every": 0,
+        "intensity": 0.5
+      }
+    },
+    {
+      "situation": "Riff syncopé, accents déplacés",
+      "plan": {
+        "hat": "ride",
+        "kick_density": 1.0,
+        "ghost_notes": true,
+        "fill_every": 4,
+        "intensity": 0.8
+      }
+    },
+    {
+      "situation": "Montée vers un refrain",
+      "plan": {
+        "hat": "sixteenths",
+        "kick_density": 0.8,
+        "ghost_notes": false,
+        "fill": true,
+        "intensity": 0.85
+      }
+    },
+    {
+      "situation": "Section lourde, accords tenus",
+      "plan": {
+        "feel": "half_time",
+        "hat": "open",
+        "kick_density": 0.9,
+        "ghost_notes": false,
+        "crash": true,
+        "intensity": 0.95
+      }
+    }
+  ]
+}

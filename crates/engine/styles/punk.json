@@ -1,0 +1,50 @@
+{
+  "id": "punk",
+  "name": "Punk",
+  "description": "Rapide, direct, sans fioritures : l'énergie avant la finesse.",
+  "prompt": "Tout est joué fort et droit. Pas de notes fantômes, pas de nuances. Sur les passages rapides, passe en tempo doublé (caisse claire sur chaque contretemps, grosse caisse sur chaque temps). Charleston ouvert ou croches serrées. Les roulements sont courts et rares.",
+  "plan": {
+    "feel": "normal",
+    "hat": "eighths",
+    "kick": "accents",
+    "kick_density": 0.7,
+    "ghost_notes": false,
+    "crash": true,
+    "fill": false,
+    "fill_every": 0,
+    "intensity": 1.0
+  },
+  "examples": [
+    {
+      "situation": "Couplet rapide, accords en croches serrées",
+      "plan": {
+        "feel": "double_time",
+        "kick": "four_on_floor",
+        "hat": "eighths",
+        "kick_density": 0.3,
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Refrain scandé, accords ouverts",
+      "plan": {
+        "feel": "normal",
+        "hat": "open",
+        "kick_density": 0.8,
+        "crash": true,
+        "intensity": 1.0
+      }
+    },
+    {
+      "situation": "Pont où la guitare joue seule",
+      "plan": {
+        "feel": "normal",
+        "hat": "quarters",
+        "kick": "four_on_floor",
+        "kick_density": 0.0,
+        "crash": false,
+        "intensity": 0.7
+      }
+    }
+  ]
+}
