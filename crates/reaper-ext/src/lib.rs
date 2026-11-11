@@ -3,6 +3,7 @@
 //! Elle ajoute des actions à REAPER. Le travail d'analyse et d'écriture est fait par
 //! `aidrummer-engine` ; ici on lit le projet, on affiche le résultat et on parle à l'IA.
 
+mod panel;
 mod project;
 
 use std::error::Error;
@@ -32,6 +33,8 @@ const DATA_DIR: &str = "AIDrummer";
 const LAST_ANALYSIS_FILE: &str = "derniere-analyse.json";
 const LAST_PLAN_FILE: &str = "derniere-reponse-ia.json";
 const SETTINGS_FILE: &str = "reglages-ia.json";
+const JOURNAL_FILE: &str = "journal.txt";
+const JOURNAL_MAX_BYTES: u64 = 512 * 1024;
 /// Variable d'environnement qui peut porter la clé d'accès à la place du fichier de réglages.
 const API_KEY_ENV: &str = "AIDRUMMER_API_KEY";
 /// Nombre de modèles affichés au plus par la liste des modèles.
@@ -46,9 +49,10 @@ enum Action {
     AiDrumsWithInstruction,
     AiModels,
     AiSettings,
+    Panel,
 }
 
-const ACTION_TABLE: [(Action, &str, &str); 7] = [
+const ACTION_TABLE: [(Action, &str, &str); 8] = [
     (
         Action::Summary,
         "AIDRUMMER_PROJECT_SUMMARY",
@@ -84,6 +88,11 @@ const ACTION_TABLE: [(Action, &str, &str); 7] = [
         "AIDRUMMER_AI_SETTINGS",
         "AI Drummer : réglages de l'IA",
     ),
+    (
+        Action::Panel,
+        "AIDRUMMER_PANEL",
+        "AI Drummer : ouvrir ou fermer le panneau",
+    ),
 ];
 
 /// Ce qu'une demande à l'IA rapporte au fil principal.
@@ -106,7 +115,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
     let _ = ACTIONS.set(actions);
     session.plugin_register_add_hook_command::<Actions>()?;
-    session.plugin_register_add_timer(collect_answer)?;
+    session.plugin_register_add_timer(tick)?;
     let _ = SESSION.set(Fragile::new(session));
     Ok(())
 }
@@ -115,8 +124,37 @@ fn reaper() -> Option<&'static Reaper> {
     SESSION.get().map(|session| session.get().reaper())
 }
 
+/// Affiche un texte : dans le journal du panneau, et dans la console de REAPER quand le
+/// panneau est fermé.
+fn emit(reaper: &Reaper, text: &str) {
+    panel::log(text);
+    append_to_journal(reaper, text);
+    if !panel::is_open() {
+        reaper.show_console_msg(format!("{}\n", text.trim_end()));
+    }
+}
+
+/// Garde une trace de chaque message dans `AIDrummer/journal.txt`. Le fichier repart de zéro
+/// quand il dépasse `JOURNAL_MAX_BYTES`.
+fn append_to_journal(reaper: &Reaper, text: &str) {
+    use std::io::Write;
+    let Ok(file) = data_file(reaper, JOURNAL_FILE) else {
+        return;
+    };
+    let too_big = std::fs::metadata(&file).is_ok_and(|m| m.len() > JOURNAL_MAX_BYTES);
+    let journal = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(!too_big)
+        .truncate(too_big)
+        .open(&file);
+    if let Ok(mut journal) = journal {
+        let _ = writeln!(journal, "{}", text.trim_end());
+    }
+}
+
 fn say(reaper: &Reaper, message: impl AsRef<str>) {
-    reaper.show_console_msg(format!("AI Drummer : {}\n", message.as_ref()));
+    emit(reaper, &format!("AI Drummer : {}", message.as_ref()));
 }
 
 struct Actions;
@@ -151,6 +189,7 @@ impl HookCommand for Actions {
             }
             Action::AiModels => start_models(reaper),
             Action::AiSettings => show_settings(reaper),
+            Action::Panel => toggle_panel(reaper),
         }
         true
     }
@@ -164,9 +203,12 @@ fn print_project_summary(reaper: &Reaper) {
         .get_set_loop_time_range_2_get(project, TimeRangeType::TimeSelection)
         .map(|range| format!("de {:.3} s à {:.3} s", range.start.get(), range.end.get()))
         .unwrap_or_else(|| "aucune".to_string());
-    reaper.show_console_msg(format!(
-        "AI Drummer\n  tempo du projet : {tempo:.2} BPM\n  pistes : {tracks}\n  sélection de temps : {selection}\n"
-    ));
+    emit(
+        reaper,
+        &format!(
+            "AI Drummer\n  tempo du projet : {tempo:.2} BPM\n  pistes : {tracks}\n  sélection de temps : {selection}"
+        ),
+    );
 }
 
 fn print_selection_analysis(reaper: &Reaper) {
@@ -179,7 +221,7 @@ fn print_selection_analysis(reaper: &Reaper) {
         Ok(path) => text.push_str(&format!("  Détail complet : {path}\n")),
         Err(message) => text.push_str(&format!("  Détail complet non enregistré : {message}\n")),
     }
-    reaper.show_console_msg(text);
+    emit(reaper, &text);
 }
 
 /// Chemin d'un fichier de l'extension dans les ressources de REAPER (le dossier est créé).
@@ -310,7 +352,13 @@ fn start_models(reaper: &Reaper) {
 
 /// Appelé par REAPER plusieurs fois par seconde, sur le fil principal : relève la réponse de
 /// l'IA quand elle est arrivée.
-extern "C" fn collect_answer() {
+extern "C" fn tick() {
+    collect_answer();
+    run_panel();
+}
+
+/// Relève la réponse de l'IA quand elle est arrivée.
+fn collect_answer() {
     let answer = {
         let Ok(mut pending) = PENDING.try_lock() else {
             return;
@@ -339,6 +387,16 @@ extern "C" fn collect_answer() {
         Some(Answer::Models(Err(message))) | Some(Answer::Plan(Err(message), _)) => {
             say(reaper, message)
         }
+        Some(Answer::Models(Ok(models))) if panel::is_open() => {
+            say(
+                reaper,
+                format!(
+                    "{} modèles proposés : choisis-en un dans la liste du panneau.",
+                    models.len()
+                ),
+            );
+            panel::set_models(models);
+        }
         Some(Answer::Models(Ok(models))) => {
             let shown: Vec<&str> = models
                 .iter()
@@ -361,6 +419,69 @@ extern "C" fn collect_answer() {
         }
         Some(Answer::Plan(Ok(plan), passage)) => write_ai_drums(reaper, &plan, &passage),
     }
+}
+
+fn is_busy() -> bool {
+    PENDING
+        .try_lock()
+        .map(|pending| pending.is_some())
+        .unwrap_or(true)
+}
+
+fn toggle_panel(reaper: &Reaper) {
+    let settings = match load_settings(reaper) {
+        Ok((settings, _)) => settings,
+        Err(message) => return say(reaper, message),
+    };
+    match panel::toggle(reaper, &settings) {
+        Err(message) => say(reaper, message),
+        Ok(()) if panel::is_open() => say(reaper, "panneau ouvert."),
+        Ok(()) => say(reaper, "panneau fermé."),
+    }
+}
+
+/// Dessine le panneau et exécute ce que l'utilisateur vient d'y demander.
+fn run_panel() {
+    let (commands, error) = panel::frame(is_busy());
+    if commands.is_empty() && error.is_none() {
+        return;
+    }
+    let Some(reaper) = reaper() else {
+        return;
+    };
+    if let Some(error) = error {
+        say(
+            reaper,
+            format!("le panneau s'est fermé sur une erreur de ReaImGui : {error}"),
+        );
+    }
+    for command in commands {
+        match command {
+            panel::Command::Analyze => print_selection_analysis(reaper),
+            panel::Command::Sketch => {
+                let result = project::prepare_passage(reaper).and_then(|passage| {
+                    project::write_passage(reaper, &passage, &DrumPlan::default())
+                });
+                say(reaper, result.unwrap_or_else(|message| message));
+            }
+            panel::Command::AiDrums(instruction) => {
+                start_ai_drums(reaper, Some(instruction).filter(|text| !text.is_empty()))
+            }
+            panel::Command::ListModels => start_models(reaper),
+            panel::Command::SaveSettings(settings) => save_settings(reaper, &settings),
+        }
+    }
+}
+
+fn save_settings(reaper: &Reaper, settings: &AiSettings) {
+    let saved = save_json(reaper, SETTINGS_FILE, settings);
+    say(
+        reaper,
+        match saved {
+            Ok(file) => format!("réglages de l'IA enregistrés dans {file}"),
+            Err(message) => format!("réglages non enregistrés : {message}"),
+        },
+    );
 }
 
 fn write_ai_drums(reaper: &Reaper, plan: &DrumPlan, passage: &Passage) {

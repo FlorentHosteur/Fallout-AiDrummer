@@ -15,13 +15,14 @@ C'est un squelette. Ce qui existe aujourd'hui :
 
 | Élément | État |
 |---|---|
-| Extension chargée par REAPER, avec sept actions | fonctionne dans REAPER 7 sous macOS ; sous Windows, compile mais n'a pas encore été chargée |
+| Extension chargée par REAPER, avec huit actions | fonctionne dans REAPER 7 sous macOS ; sous Windows, compile mais n'a pas encore été chargée |
 | « Analyser la sélection » : carte d'accents de chaque piste audio, et lecture de la batterie MIDI existante | fonctionne ; exact sur un projet de synthèse, plausible mais non vérifié à l'oreille sur un vrai projet |
 | « Écrire une ébauche de batterie » : item MIDI calé sur les accents du morceau, par règles | fonctionne |
 | « Batterie avec l'IA » : une IA choisit le jeu (pulsation, charleston, densité, roulement), avec ou sans consigne écrite | fonctionne contre un faux fournisseur local ; pas encore essayé avec un vrai fournisseur |
 | La carte d'accents sur un fichier audio, en ligne de commande | fonctionne |
 | Recherche du tempo dans l'audio, sans le projet | fonctionne ; juste sur des clics de synthèse |
-| Conseils sur une batterie existante, panneau | à faire |
+| Panneau ancrable au style terminal (boutons, consigne, réglages de l'IA, journal) | s'ouvre et tourne sans erreur avec ReaImGui 0.10 sous macOS ; affichage pas encore relu par un humain |
+| Conseils sur une batterie existante, composition à partir de zéro | à faire |
 
 Limite connue : la grille de temps et la tonalité renvoyées par la bibliothèque `stratum-dsp` (commande `analyze`) sont peu fiables. La carte d'accents ne s'en sert pas : elle part du tempo du projet REAPER.
 
@@ -115,6 +116,24 @@ Le fichier produit est `target\release\reaper_aidrummer.dll` sous Windows, `targ
 
 ## Utiliser l'extension dans REAPER
 
+Deux façons de lancer AI Drummer : la liste des actions de REAPER (*Actions → Show action list*, puis taper « AI Drummer »), ou le panneau.
+
+### Le panneau
+
+Le panneau regroupe tout dans une fenêtre ancrable : les boutons ANALYSER, ÉBAUCHE et BATTERIE AVEC L'IA, la consigne pour l'IA, ses réglages (adresse, modèle, clé, liste des modèles) et un journal qui remplace la console.
+
+Il a besoin de l'extension ReaImGui, version 0.10 ou plus récente :
+
+1. Installe [ReaPack](https://reapack.com) (un fichier à déposer dans `UserPlugins`, expliqué sur son site), puis redémarre REAPER.
+2. Dans REAPER : *Extensions → ReaPack → Browse packages*, cherche « ReaImGui », clic droit → *Install*, puis *Apply*.
+3. Redémarre REAPER.
+
+Ouvre ensuite le panneau avec l'action « AI Drummer : ouvrir ou fermer le panneau » (tu peux lui donner un raccourci ou un bouton de barre d'outils). Sans ReaImGui, cette action rappelle ces étapes et les autres actions restent utilisables.
+
+Tous les messages sont aussi gardés dans `AIDrummer/journal.txt`, dans le dossier de ressources de REAPER.
+
+### Les actions, une par une
+
 1. Démarre REAPER et ouvre un projet.
 2. Fais une sélection de temps sur le passage à étudier (quelques mesures).
 3. Ouvre la liste des actions (*Actions → Show action list*), cherche « AI Drummer » et lance « AI Drummer : analyser la sélection ».
@@ -181,7 +200,7 @@ L'IA ne reçoit pas l'audio et n'écrit pas les notes. Elle reçoit le compte re
 | Réglage | Sens |
 |---|---|
 | `base_url` | L'adresse d'une API compatible OpenAI. `https://openrouter.ai/api/v1` pour OpenRouter, `https://api.openai.com/v1` pour OpenAI, ou toute autre adresse qui parle le même protocole (un serveur local, par exemple). |
-| `model` | Le nom du modèle chez ce fournisseur. « AI Drummer : lister les modèles de l'IA » affiche les noms disponibles ; copie celui que tu veux. |
+| `model` | Le nom du modèle chez ce fournisseur. « AI Drummer : lister les modèles de l'IA » affiche les noms disponibles ; copie celui que tu veux. Exemples chez OpenRouter, relevés le 11 novembre 2026 : `anthropic/claude-sonnet-5.5`, `anthropic/claude-haiku-5.5`, `openai/gpt-6.1-terra`, `openai/gpt-6-luna`, `mistralai/mistral-large-4-0`. |
 | `api_key` | Ta clé d'accès. Elle est enregistrée en clair dans ce fichier : ne le partage pas. Tu peux la laisser vide et la donner par la variable d'environnement `AIDRUMMER_API_KEY`. |
 
 Le fichier est relu à chaque demande : pas besoin de redémarrer REAPER.
@@ -243,7 +262,7 @@ Un test est volontairement ignoré : il documente l'imprécision de la grille de
 |---|---|
 | `crates/engine` | Le moteur : décodage audio, détection d'attaques, carte d'accents, lecture et écriture de batterie, appel à l'IA. Ne dépend pas de REAPER, se teste seul. |
 | `crates/cli` | La commande `aidrummer`, pour essayer le moteur sans REAPER. |
-| `crates/reaper-ext` | L'extension chargée par REAPER. Elle s'appuie sur [reaper-rs](https://github.com/helgoboss/reaper-rs). |
+| `crates/reaper-ext` | L'extension chargée par REAPER : actions, lecture et écriture du projet, panneau. Elle s'appuie sur [reaper-rs](https://github.com/helgoboss/reaper-rs) et, pour le panneau, sur [ReaImGui](https://github.com/cfillion/reaimgui). |
 | `scripts` | Compilation et installation dans REAPER. |
 | `docs/pilotage.html` | Source de la page de suivi du projet. |
 
