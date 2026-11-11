@@ -2,7 +2,6 @@
 name = "aidrummer-engine"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --workspace --release
+      - name: Script d'installation (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $resources = Join-Path $env:RUNNER_TEMP 'REAPER'
+          New-Item -ItemType Directory -Force $resources | Out-Null
+          ./scripts/install.ps1 -ResourcePath $resources
+          if (-not (Test-Path (Join-Path $resources 'UserPlugins\reaper_aidrummer.dll'))) { throw 'DLL absente' }
+      - name: Script d'installation (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "$RUNNER_TEMP/REAPER"
+          ./scripts/install.sh "$RUNNER_TEMP/REAPER"
+          test -f "$RUNNER_TEMP/REAPER/UserPlugins/reaper_aidrummer.dylib"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reaper_aidrummer-${{ runner.os }}
+          path: |
+            target/release/reaper_aidrummer.dll
+            target/release/libreaper_aidrummer.dylib
+          if-no-files-found: error
