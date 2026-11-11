@@ -15,6 +15,7 @@ dependencies = [
 name = "aidrummer-engine"
 version = "0.1.0"
 dependencies = [
+ "rustfft",
  "serde",
  "serde_json",
  "stratum-dsp",

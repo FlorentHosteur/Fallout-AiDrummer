@@ -2,11 +2,15 @@
 //!
 //! Ce crate ne dépend pas de Reaper : il se teste et s'utilise seul (voir le binaire `aidrummer`).
 
+pub mod accents;
 pub mod analysis;
 pub mod audio;
+pub mod onsets;
 
+pub use accents::{accent_map, AccentMap, BarAccents, Grid};
 pub use analysis::{analyze, grid_fit, GridFit, SongAnalysis};
 pub use audio::{decode_mono, Audio};
+pub use onsets::{detect_onsets, Onset};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {

@@ -51,7 +51,8 @@ fn finds_the_tempo_of_a_click_track() {
 fn detected_beats_sit_on_the_click() {
     let audio = click_track(120.0, 30.0);
     let analysis = analyze(&audio).expect("analyse");
-    let fit = grid_fit(&analysis.beats, 120.0, 0.0).expect("écart à la grille");
+    let beats: Vec<f64> = analysis.beats.iter().map(|&b| b as f64).collect();
+    let fit = grid_fit(&beats, 120.0, 0.0).expect("écart à la grille");
     assert!(
         fit.mean_offset_ms.abs() < 40.0 && fit.spread_ms < 40.0,
         "temps détectés loin du clic : {fit:?}"

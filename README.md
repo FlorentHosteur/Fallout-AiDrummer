@@ -16,11 +16,11 @@ C'est un squelette. Ce qui existe aujourd'hui :
 | Élément | État |
 |---|---|
 | Extension chargée par REAPER, avec l'action « AI Drummer : résumé du projet » | compile sur Windows et macOS ; pas encore essayée dans REAPER |
-| Analyse d'un fichier audio en ligne de commande (tempo, tonalité, temps) | fonctionne ; le tempo est juste sur des clics de synthèse, pas encore essayé sur de la vraie musique |
-| Mesure de l'écart du jeu par rapport au clic du projet | fonctionne, testée |
-| Lecture des pistes du projet, écriture MIDI, appel à une IA, panneau | à faire |
+| Carte d'accents d'un fichier audio sur la grille du projet (accents par mesure, motif dominant, niveau par mesure, écart au clic) | fonctionne en ligne de commande ; testée sur des riffs de synthèse, pas encore sur un instrument enregistré |
+| Recherche du tempo dans l'audio, sans le projet | fonctionne ; juste sur des clics de synthèse |
+| Lecture des pistes du projet depuis l'extension, écriture MIDI, appel à une IA, panneau | à faire |
 
-Limite connue : la grille de temps et la tonalité renvoyées par la bibliothèque d'analyse (`stratum-dsp`) sont peu fiables. Elles seront remplacées par une détection d'attaques calée sur le tempo du projet REAPER.
+Limite connue : la grille de temps et la tonalité renvoyées par la bibliothèque `stratum-dsp` (commande `analyze`) sont peu fiables. La carte d'accents ne s'en sert pas : elle part du tempo du projet REAPER.
 
 ## Installer le kit de développement
 
@@ -122,11 +122,31 @@ Si l'action n'apparaît pas, l'extension n'a pas été chargée : vérifie que l
 
 ## Essayer l'analyse sans REAPER
 
+La commande `accents` range les attaques d'un extrait sur la grille du projet. Donne-lui le tempo du projet :
+
 ```powershell
-cargo run --release -p aidrummer -- analyze chemin\vers\riff.wav --project-bpm 120
+cargo run --release -p aidrummer -- accents chemin\vers\riff.wav --project-bpm 120
 ```
 
-Le résultat sort en JSON : tempo, tonalité, position des temps, et l'écart du jeu par rapport à une grille à 120 BPM (`grid_fit`). `mean_offset_ms` positif veut dire que le jeu est en retard sur le clic ; `spread_ms` mesure sa régularité. Les formats WAV, FLAC, MP3, OGG et AAC sont lus.
+Le résultat sort en JSON. Les champs utiles :
+
+| Champ | Sens |
+|---|---|
+| `pattern` | Le motif dominant, un groupe par noire : `X` accent fort, `x` accent léger, `.` rien. Exemple : `X..x ..X. X.x. X...` |
+| `folded` | Le même motif en chiffres, une valeur entre 0 et 1 par double croche |
+| `bars` | Le détail mesure par mesure, avec le niveau sonore de chaque mesure (`energy`) |
+| `timing.mean_offset_ms` | Décalage moyen du jeu par rapport au clic ; positif = en retard |
+| `timing.spread_ms` | Régularité du jeu ; petit = régulier |
+
+Options : `--beats-per-bar 3` pour du 3/4 (ou `3,5` pour du 7/8), `--slots-per-beat 3` pour des triolets, `--grid-origin 1,25` si la première mesure commence à 1,25 s dans le fichier.
+
+La commande `analyze` cherche le tempo dans l'audio sans rien savoir du projet :
+
+```powershell
+cargo run --release -p aidrummer -- analyze chemin\vers\riff.wav
+```
+
+Les formats WAV, FLAC, MP3, OGG et AAC sont lus.
 
 ## Lancer les tests
 
@@ -140,7 +160,7 @@ Un test est volontairement ignoré : il documente l'imprécision de la grille de
 
 | Dossier | Rôle |
 |---|---|
-| `crates/engine` | Le moteur : décodage audio, analyse. Ne dépend pas de REAPER, se teste seul. |
+| `crates/engine` | Le moteur : décodage audio, détection d'attaques, carte d'accents. Ne dépend pas de REAPER, se teste seul. |
 | `crates/cli` | La commande `aidrummer`, pour essayer le moteur sans REAPER. |
 | `crates/reaper-ext` | L'extension chargée par REAPER. Elle s'appuie sur [reaper-rs](https://github.com/helgoboss/reaper-rs). |
 | `scripts` | Compilation et installation dans REAPER. |

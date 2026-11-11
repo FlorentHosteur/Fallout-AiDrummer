@@ -60,14 +60,14 @@ pub struct GridFit {
 ///
 /// Les écarts sont mesurés sur le cercle d'un temps : un temps détecté juste avant
 /// le clic compte comme une petite avance, pas comme un grand retard.
-pub fn grid_fit(beats: &[f32], project_bpm: f64, grid_origin_s: f64) -> Option<GridFit> {
+pub fn grid_fit(beats: &[f64], project_bpm: f64, grid_origin_s: f64) -> Option<GridFit> {
     if beats.is_empty() || project_bpm <= 0.0 {
         return None;
     }
     let period = 60.0 / project_bpm;
     let (mut sin_sum, mut cos_sum) = (0.0f64, 0.0f64);
     for &beat in beats {
-        let phase = ((beat as f64 - grid_origin_s) / period).rem_euclid(1.0) * std::f64::consts::TAU;
+        let phase = ((beat - grid_origin_s) / period).rem_euclid(1.0) * std::f64::consts::TAU;
         sin_sum += phase.sin();
         cos_sum += phase.cos();
     }
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn grid_fit_measures_a_constant_delay() {
         // Temps à 120 BPM, tous en retard de 20 ms.
-        let beats: Vec<f32> = (0..32).map(|i| i as f32 * 0.5 + 0.020).collect();
+        let beats: Vec<f64> = (0..32).map(|i| i as f64 * 0.5 + 0.020).collect();
         let fit = grid_fit(&beats, 120.0, 0.0).unwrap();
         assert!((fit.mean_offset_ms - 20.0).abs() < 0.5, "{fit:?}");
         assert!(fit.spread_ms < 0.5, "{fit:?}");
@@ -101,16 +101,16 @@ mod tests {
     #[test]
     fn grid_fit_reads_an_early_beat_as_early() {
         // 10 ms d'avance : ne doit pas être lu comme 490 ms de retard.
-        let beats: Vec<f32> = (1..32).map(|i| i as f32 * 0.5 - 0.010).collect();
+        let beats: Vec<f64> = (1..32).map(|i| i as f64 * 0.5 - 0.010).collect();
         let fit = grid_fit(&beats, 120.0, 0.0).unwrap();
         assert!((fit.mean_offset_ms + 10.0).abs() < 0.5, "{fit:?}");
     }
 
     #[test]
     fn grid_fit_spread_grows_with_loose_playing() {
-        let tight: Vec<f32> = (0..64).map(|i| i as f32 * 0.5).collect();
-        let loose: Vec<f32> = (0..64)
-            .map(|i| i as f32 * 0.5 + if i % 2 == 0 { 0.030 } else { -0.030 })
+        let tight: Vec<f64> = (0..64).map(|i| i as f64 * 0.5).collect();
+        let loose: Vec<f64> = (0..64)
+            .map(|i| i as f64 * 0.5 + if i % 2 == 0 { 0.030 } else { -0.030 })
             .collect();
         let tight_fit = grid_fit(&tight, 120.0, 0.0).unwrap();
         let loose_fit = grid_fit(&loose, 120.0, 0.0).unwrap();
