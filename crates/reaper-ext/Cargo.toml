@@ -1,0 +1,16 @@
+[package]
+name = "reaper_aidrummer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aidrummer-engine = { version = "0.1.0", path = "../engine" }
+fragile = "3.0.0"
+reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", version = "0.1.0" }
+reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", version = "0.1.0" }
+reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", version = "0.1.0" }
+
+[lib]
+name = "reaper_aidrummer"
+crate-type = ["cdylib"]
