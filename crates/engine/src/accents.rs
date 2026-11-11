@@ -171,6 +171,49 @@ pub fn accent_map(audio: &Audio, onsets: &[Onset], grid: Grid) -> AccentMap {
     }
 }
 
+/// Carte d'accents de départ pour composer sans audio : un motif de base, le même à chaque
+/// mesure, sur lequel la batterie se cale comme sur un vrai morceau.
+///
+/// Les forces sont étagées pour que la densité de grosse caisse du plan choisisse ce qui est
+/// joué : le premier temps toujours, puis le temps 3, puis les contretemps.
+pub fn template_accents(grid: Grid, duration_s: f64) -> AccentMap {
+    let per_beat = grid.slots_per_beat as usize;
+    let per_bar = grid.slots_per_bar();
+    let mut pattern = vec![0.0f32; per_bar];
+    let mut set = |slot: usize, strength: f32| {
+        if let Some(cell) = pattern.get_mut(slot) {
+            *cell = strength;
+        }
+    };
+    set(0, 1.0);
+    set(2 * per_beat, 0.7);
+    if per_beat.is_multiple_of(2) {
+        set(per_beat + per_beat / 2, 0.5);
+        set(3 * per_beat + per_beat / 2, 0.4);
+    }
+    if per_beat >= 4 {
+        set(2 * per_beat - 1, 0.3);
+    }
+
+    let bar_s = grid.bar_s();
+    let first_bar = ((0.0 - grid.origin_s) / bar_s).floor() as i64;
+    let last_bar = (((duration_s - grid.origin_s) / bar_s).ceil() as i64 - 1).max(first_bar);
+    AccentMap {
+        pattern: pattern_text(&pattern, per_beat),
+        grid,
+        bars: (first_bar..=last_bar)
+            .map(|bar| BarAccents {
+                bar,
+                slots: pattern.clone(),
+                energy: 1.0,
+            })
+            .collect(),
+        folded: pattern,
+        timing: None,
+        onsets_used: 0,
+    }
+}
+
 fn pattern_text(folded: &[f32], slots_per_beat: usize) -> String {
     folded
         .chunks(slots_per_beat.max(1))
@@ -254,6 +297,32 @@ mod tests {
             bar_length_qn: 4.0,
         };
         assert!(Grid::from_project(span, 4).is_none());
+    }
+
+    #[test]
+    fn template_gives_every_bar_the_same_base_pattern() {
+        let grid = Grid {
+            bpm: 120.0,
+            beats_per_bar: 4.0,
+            slots_per_beat: 4,
+            origin_s: 0.0,
+        };
+        // 5 s à 120 BPM : deux mesures et demie, donc trois mesures.
+        let map = template_accents(grid, 5.0);
+        assert_eq!(map.bars.len(), 3);
+        assert_eq!(map.pattern, "X... ..xx X... ..x.");
+        assert!(map.bars.iter().all(|bar| bar.slots == map.folded));
+    }
+
+    #[test]
+    fn template_fits_a_three_beat_bar() {
+        let grid = Grid {
+            bpm: 120.0,
+            beats_per_bar: 3.0,
+            slots_per_beat: 4,
+            origin_s: 0.0,
+        };
+        assert_eq!(template_accents(grid, 1.5).pattern, "X... ..xx X...");
     }
 
     #[test]

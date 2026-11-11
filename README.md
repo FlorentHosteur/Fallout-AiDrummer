@@ -21,9 +21,9 @@ C'est un squelette. Ce qui existe aujourd'hui :
 | « Batterie avec l'IA » : une IA choisit le jeu (pulsation, charleston, densité, roulement), avec ou sans consigne écrite | fonctionne contre un faux fournisseur local ; pas encore essayé avec un vrai fournisseur |
 | La carte d'accents sur un fichier audio, en ligne de commande | fonctionne |
 | Recherche du tempo dans l'audio, sans le projet | fonctionne ; juste sur des clics de synthèse |
-| Panneau ancrable au style terminal (boutons, consigne, réglages de l'IA, journal) | s'ouvre et tourne sans erreur avec ReaImGui 0.10 sous macOS ; affichage pas encore relu par un humain |
+| Panneau ancrable au style terminal (boutons, consigne, réglages de l'IA, conseils, journal) | s'ouvre avec ReaImGui 0.10 sous macOS ; ses boutons n'ont pas tous été essayés à la main |
 | Conseils sur une batterie existante, avec copie corrigée ; avis de l'IA | fonctionne ; conseils tirés de règles simples, à juger à l'oreille |
-| Composition à partir de zéro, sans audio dans la sélection | à faire |
+| Composition à partir de zéro, sans audio dans la sélection | fonctionne ; essayée sur un projet vide en 3/4 |
 
 Limite connue : la grille de temps et la tonalité renvoyées par la bibliothèque `stratum-dsp` (commande `analyze`) sont peu fiables. La carte d'accents ne s'en sert pas : elle part du tempo du projet REAPER.
 
@@ -214,6 +214,12 @@ Le fichier est relu à chaque demande : pas besoin de redémarrer REAPER.
 REAPER reste utilisable pendant l'attente. À la réponse, la console affiche les choix de l'IA et son explication, et la batterie est écrite sur la piste « AI Drummer ». Une seule annulation la retire. La dernière réponse est gardée dans `AIDrummer/derniere-reponse-ia.json`.
 
 Chaque demande est facturée par ton fournisseur selon le modèle choisi. Le message envoyé tient en quelques centaines de mots.
+
+### Composer à partir de zéro
+
+Les deux actions d'écriture marchent aussi quand rien ne sonne dans la sélection, par exemple dans un projet vide. Règle le tempo et la mesure du projet, sélectionne quelques mesures, puis lance « écrire une ébauche de batterie » ou « batterie avec l'IA ».
+
+La batterie est alors posée sur un motif de base au lieu des accents du morceau : grosse caisse sur le premier temps, puis sur le temps 3, puis sur les contretemps à mesure que la densité monte. Avec l'IA, la consigne fait tout le travail : « rock binaire simple », « ballade en demi-temps à la ride », « punk rapide, charleston ouvert ».
 
 ### Conseils sur une batterie existante
 

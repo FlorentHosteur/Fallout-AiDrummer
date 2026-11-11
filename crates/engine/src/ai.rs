@@ -127,6 +127,11 @@ pub fn user_prompt(analysis: &SelectionAnalysis, instruction: Option<&str>) -> S
             text.push_str(&format!("  {} : {}\n", track.name, levels.join(" ")));
         }
     }
+    if analysis.tracks.is_empty() {
+        text.push_str(
+            "\nLe passage est vide : le musicien compose à partir de zéro. Propose la batterie de départ ; elle sera posée sur un motif de base (premier temps, temps 3, contretemps).\n",
+        );
+    }
     match instruction.map(str::trim).filter(|i| !i.is_empty()) {
         Some(instruction) => text.push_str(&format!("\nConsigne du musicien : {instruction}\n")),
         None => text.push_str("\nPas de consigne du musicien.\n"),
@@ -501,5 +506,7 @@ mod tests {
         assert!(user_prompt(&analysis(), Some("  plus calme "))
             .contains("Consigne du musicien : plus calme"));
         assert!(user_prompt(&analysis(), Some("  ")).contains("Pas de consigne"));
+        // Sans piste audio, l'IA est prévenue qu'on compose à partir de zéro.
+        assert!(user_prompt(&analysis(), None).contains("à partir de zéro"));
     }
 }

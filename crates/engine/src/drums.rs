@@ -754,6 +754,32 @@ mod tests {
     }
 
     #[test]
+    fn from_scratch_the_plan_alone_shapes_the_groove() {
+        use crate::accents::template_accents;
+        // Deux mesures vides à 120 BPM.
+        let template = template_accents(grid(), 4.0);
+        let kicks = |density: f32| {
+            let plan = DrumPlan {
+                kick_density: density,
+                ..DrumPlan::default()
+            };
+            let part = write_drums(&grid(), std::slice::from_ref(&template), &plan);
+            part.iter()
+                .filter(|n| n.note == notes::KICK && n.position_qn < 4.0)
+                .map(|n| (n.position_qn * 4.0).round() as usize)
+                .collect::<Vec<_>>()
+        };
+        // Grosse caisse sur 1 seulement, puis 1 et 3, puis avec les contretemps.
+        assert_eq!(kicks(0.0), vec![0]);
+        assert_eq!(kicks(0.5), vec![0, 8]);
+        assert_eq!(kicks(1.0), vec![0, 6, 7, 8, 14]);
+        // La batterie complète est là : caisse claire sur 2 et 4, charleston à la croche.
+        let part = write_drums(&grid(), &[template], &DrumPlan::default());
+        assert_eq!(slots_of(&part, notes::SNARE), vec![4, 12, 20, 28]);
+        assert_eq!(slots_of(&part, notes::HAT_CLOSED).len(), 16);
+    }
+
+    #[test]
     fn sketch_of_nothing_is_empty() {
         assert!(sketch_drums(&grid(), &[]).is_empty());
     }

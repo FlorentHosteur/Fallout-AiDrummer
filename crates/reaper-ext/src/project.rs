@@ -5,8 +5,8 @@ use std::ffi::{c_char, CStr, CString};
 use std::ptr::null_mut;
 
 use aidrummer_engine::{
-    accent_map, detect_onsets_after_preroll, read_drums, write_drums, AccentMap, Audio, DrumNote,
-    DrumPlan, Grid, ProjectSpan, SelectionAnalysis, TrackAccents,
+    accent_map, detect_onsets_after_preroll, read_drums, template_accents, write_drums, AccentMap,
+    Audio, DrumNote, DrumPlan, Grid, ProjectSpan, SelectionAnalysis, TrackAccents,
 };
 use reaper_medium::{MediaTrack, PositionInSeconds, ProjectContext, Reaper, TimeRangeType};
 
@@ -63,27 +63,36 @@ impl Passage {
         &self.grid.grid
     }
 
-    /// Les cartes d'accents des pistes audio du passage.
-    pub fn accents(&self) -> Vec<AccentMap> {
+    /// Les cartes d'accents des pistes audio du passage. Vide si rien ne sonne.
+    pub fn audio_accents(&self) -> Vec<AccentMap> {
         self.analysis
             .tracks
             .iter()
             .map(|t| t.accents.clone())
             .collect()
     }
+
+    /// Ce sur quoi caler une batterie : les accents des pistes audio, ou un motif de base
+    /// quand rien ne sonne dans la sélection (composition à partir de zéro).
+    pub fn accents(&self) -> Vec<AccentMap> {
+        if self.is_from_scratch() {
+            let duration_s = self.analysis.end_s - self.analysis.start_s;
+            vec![template_accents(self.grid.grid, duration_s)]
+        } else {
+            self.audio_accents()
+        }
+    }
+
+    pub fn is_from_scratch(&self) -> bool {
+        self.analysis.tracks.is_empty()
+    }
 }
 
-/// Analyse la sélection et vérifie qu'on peut y caler une batterie.
+/// Analyse la sélection : accents des pistes qui sonnent et batteries MIDI existantes.
 pub fn prepare_passage(reaper: &Reaper) -> Result<Passage, String> {
     let (start_s, end_s) = selection(reaper)?;
     let grid = read_grid(reaper, start_s, end_s)?;
     let (analysis, drums) = analyze(reaper, start_s, end_s, &grid);
-    if analysis.tracks.is_empty() {
-        return Err(
-            "Aucune piste ne contient de son dans la sélection : rien sur quoi caler une batterie."
-                .to_string(),
-        );
-    }
     Ok(Passage {
         analysis,
         drums,
@@ -100,17 +109,23 @@ pub fn write_passage(
 ) -> Result<String, String> {
     let part = write_drums(passage.grid(), &passage.accents(), plan);
     let written = write_notes(reaper, passage, &part)?;
+    let basis = if passage.is_from_scratch() {
+        "posées sur un motif de base, faute de son dans la sélection".to_string()
+    } else {
+        format!(
+            "calées sur : {}",
+            passage
+                .analysis
+                .tracks
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
     Ok(format!(
-        "{written} notes écrites sur la piste « {SKETCH_TRACK} », de {:.3} s à {:.3} s, calées sur : {}.\n  Pour annuler : Édition → Annuler.",
-        passage.analysis.start_s,
-        passage.analysis.end_s,
-        passage
-            .analysis
-            .tracks
-            .iter()
-            .map(|t| t.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
+        "{written} notes écrites sur la piste « {SKETCH_TRACK} », de {:.3} s à {:.3} s, {basis}.\n  Pour annuler : Édition → Annuler.",
+        passage.analysis.start_s, passage.analysis.end_s,
     ))
 }
 

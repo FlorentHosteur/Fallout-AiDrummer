@@ -11,7 +11,7 @@ pub mod drums;
 pub mod onsets;
 pub mod report;
 
-pub use accents::{accent_map, AccentMap, BarAccents, Grid, ProjectSpan};
+pub use accents::{accent_map, template_accents, AccentMap, BarAccents, Grid, ProjectSpan};
 pub use advice::{advice_report, advise, apply_advice, Advice, Edit};
 pub use ai::{ask_advice, ask_plan, list_models, AiSettings};
 pub use analysis::{analyze, grid_fit, GridFit, SongAnalysis};

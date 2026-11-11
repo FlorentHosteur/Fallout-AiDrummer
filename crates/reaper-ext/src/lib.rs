@@ -477,7 +477,8 @@ fn compute_advice(reaper: &Reaper) -> Result<AdviceSet, String> {
         .or(if passage.drums.is_empty() { None } else { Some(0) })
         .ok_or("aucune batterie MIDI dans la sélection. Une piste est lue comme batterie si son nom, un de ses effets ou son dossier parle de batterie (« drums », « Superior Drummer »…).")?;
     let (track, part) = passage.drums.swap_remove(index);
-    let advices = advise(&part, passage.grid(), &passage.accents());
+    // Les conseils comparent la batterie au vrai morceau, jamais au motif de base.
+    let advices = advise(&part, passage.grid(), &passage.audio_accents());
     Ok(AdviceSet {
         passage,
         track,
