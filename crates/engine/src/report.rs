@@ -63,7 +63,11 @@ pub fn selection_report(analysis: &SelectionAnalysis) -> String {
         let timing = match &track.accents.timing {
             Some(fit) => format!(
                 "{} de {:.0} ms, régularité {:.0} ms",
-                if fit.mean_offset_ms >= 0.0 { "retard" } else { "avance" },
+                if fit.mean_offset_ms >= 0.0 {
+                    "retard"
+                } else {
+                    "avance"
+                },
                 fit.mean_offset_ms.abs(),
                 fit.spread_ms
             ),
@@ -109,7 +113,9 @@ fn drum_report(drums: &DrumReading) -> String {
         let list: Vec<String> = drums
             .unknown_notes
             .iter()
-            .map(|(note, count)| format!("{note} ({count} coup{})", if *count > 1 { "s" } else { "" }))
+            .map(|(note, count)| {
+                format!("{note} ({count} coup{})", if *count > 1 { "s" } else { "" })
+            })
             .collect();
         text.push_str(&format!(
             "    Notes absentes de la table, rangées dans « autres notes » : {}\n",
@@ -136,9 +142,7 @@ fn trim_number(value: f64) -> String {
     if (value - value.round()).abs() < 1e-9 {
         format!("{value:.0}")
     } else {
-        format!("{value:.2}")
-            .trim_end_matches('0')
-            .to_string()
+        format!("{value:.2}").trim_end_matches('0').to_string()
     }
 }
 
@@ -184,8 +188,14 @@ mod tests {
     #[test]
     fn report_shows_the_grid_the_pattern_and_the_timing() {
         let text = selection_report(&analysis());
-        assert!(text.contains("120.00 BPM · mesure de 4 noires · 2.0 mesures"), "{text}");
-        assert!(text.contains("Guitare  X... X... X... X...   retard de 10 ms, régularité 0 ms"), "{text}");
+        assert!(
+            text.contains("120.00 BPM · mesure de 4 noires · 2.0 mesures"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Guitare  X... X... X... X...   retard de 10 ms, régularité 0 ms"),
+            "{text}"
+        );
         assert!(text.contains("Sans son dans la sélection : Clic"), "{text}");
         assert!(!text.contains("Attention"), "{text}");
     }
@@ -225,10 +235,22 @@ mod tests {
         analysis.drums = vec![read_drums("drums", &part, &analysis.grid, &maps)];
         let text = selection_report(&analysis);
         assert!(text.contains("Batterie MIDI « drums » (9 coups"), "{text}");
-        assert!(text.contains("grosse caisse  X... X... X... X..."), "{text}");
-        assert!(text.contains("rangées dans « autres notes » : 31 (1 coup)"), "{text}");
-        assert!(text.contains("repris par la grosse caisse ou la caisse claire : 100 %"), "{text}");
-        assert!(text.contains("posés sur un accent du morceau : 100 %"), "{text}");
+        assert!(
+            text.contains("grosse caisse  X... X... X... X..."),
+            "{text}"
+        );
+        assert!(
+            text.contains("rangées dans « autres notes » : 31 (1 coup)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("repris par la grosse caisse ou la caisse claire : 100 %"),
+            "{text}"
+        );
+        assert!(
+            text.contains("posés sur un accent du morceau : 100 %"),
+            "{text}"
+        );
     }
 
     #[test]

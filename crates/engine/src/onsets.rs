@@ -31,7 +31,9 @@ const MIN_GAP_S: f64 = 0.045;
 
 pub fn detect_onsets(audio: &Audio) -> Vec<Onset> {
     let sample_rate = audio.sample_rate as f64;
-    let window = ((WINDOW_S * sample_rate) as usize).next_power_of_two().max(256);
+    let window = ((WINDOW_S * sample_rate) as usize)
+        .next_power_of_two()
+        .max(256);
     let hop = window / 4;
     let flux = spectral_flux(&audio.samples, window, hop);
     let Some(max_flux) = flux.iter().copied().reduce(f32::max).filter(|m| *m > 0.0) else {
@@ -136,8 +138,8 @@ fn mean_square(audio: &Audio, from_s: f64, to_s: f64) -> f64 {
 /// Sans cette avance, un passage qui commence au milieu d'une note qui résonne produit une
 /// fausse attaque à son tout début : le son semble surgir du silence.
 pub fn detect_onsets_after_preroll(audio: &Audio, preroll_s: f64) -> (Audio, Vec<Onset>) {
-    let skip = ((preroll_s * audio.sample_rate as f64).round().max(0.0) as usize)
-        .min(audio.samples.len());
+    let skip =
+        ((preroll_s * audio.sample_rate as f64).round().max(0.0) as usize).min(audio.samples.len());
     let skipped_s = skip as f64 / audio.sample_rate as f64;
     let onsets = detect_onsets(audio)
         .into_iter()

@@ -53,7 +53,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             "--beats-per-bar" => &mut options.beats_per_bar,
             "--slots-per-beat" => &mut options.slots_per_beat,
             "--grid-origin" => &mut options.grid_origin,
-            _ if arg.starts_with("--") => return Err(format!("option inconnue : {arg}\n\n{USAGE}")),
+            _ if arg.starts_with("--") => {
+                return Err(format!("option inconnue : {arg}\n\n{USAGE}"))
+            }
             _ if options.file.is_none() => {
                 options.file = Some(PathBuf::from(arg));
                 continue;

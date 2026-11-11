@@ -98,9 +98,17 @@ fn the_folded_pattern_is_the_riff() {
     let played: Vec<usize> = RIFF.iter().map(|(slot, _)| *slot).collect();
     for (slot, &strength) in map.folded.iter().enumerate() {
         if played.contains(&slot) {
-            assert!(strength >= 0.25, "case {slot} jouée mais lue à {strength:.2} ({})", map.pattern);
+            assert!(
+                strength >= 0.25,
+                "case {slot} jouée mais lue à {strength:.2} ({})",
+                map.pattern
+            );
         } else {
-            assert!(strength < 0.10, "case {slot} vide mais lue à {strength:.2} ({})", map.pattern);
+            assert!(
+                strength < 0.10,
+                "case {slot} vide mais lue à {strength:.2} ({})",
+                map.pattern
+            );
         }
     }
     // Les deux notes les plus appuyées (cases 0 et 8) sortent en accents forts.
@@ -164,10 +172,7 @@ fn cut(audio: &Audio, from_s: f64) -> Audio {
 }
 
 fn grid_from(origin_s: f64) -> Grid {
-    Grid {
-        origin_s,
-        ..grid()
-    }
+    Grid { origin_s, ..grid() }
 }
 
 #[test]
@@ -186,7 +191,11 @@ fn reading_a_little_before_the_passage_removes_the_false_attack() {
     assert_eq!(map.bars[0].slots[4], 0.0, "{:?}", map.bars[0].slots);
     // Les vraies notes de la mesure sont toujours là (cases 6, 8, 10, 12).
     for slot in [6, 8, 10, 12] {
-        assert!(map.bars[0].slots[slot] > 0.25, "case {slot} : {:?}", map.bars[0].slots);
+        assert!(
+            map.bars[0].slots[slot] > 0.25,
+            "case {slot} : {:?}",
+            map.bars[0].slots
+        );
     }
 }
 

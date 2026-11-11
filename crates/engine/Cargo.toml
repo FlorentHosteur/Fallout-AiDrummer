@@ -10,3 +10,4 @@ serde_json = "1.0.154"
 stratum-dsp = "1.0.0"
 symphonia = { version = "0.5.5", features = ["all"] }
 thiserror = "2.0.21"
+ureq = { version = "2", features = ["json"] }

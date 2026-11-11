@@ -77,8 +77,8 @@ pub fn decode_mono(path: &Path) -> Result<Audio, EngineError> {
         let spec = *decoded.spec();
         sample_rate = spec.rate;
         let channels = spec.channels.count().max(1);
-        let buf = buffer
-            .get_or_insert_with(|| SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
+        let buf =
+            buffer.get_or_insert_with(|| SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
         buf.copy_interleaved_ref(decoded);
         samples.extend(
             buf.samples()

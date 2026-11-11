@@ -3,7 +3,7 @@
 //! Les positions sont en noires, comptées depuis le début de la mesure 0 de la grille
 //! (celle qui contient le début du passage).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::accents::{AccentMap, Grid};
 
@@ -45,7 +45,11 @@ pub mod notes {
     pub const KICK: u8 = 36;
     pub const SNARE: u8 = 38;
     pub const HAT_CLOSED: u8 = 42;
+    pub const HAT_OPEN: u8 = 46;
+    pub const TOM_FLOOR: u8 = 43;
+    pub const TOM_MID: u8 = 45;
     pub const CRASH: u8 = 49;
+    pub const RIDE: u8 = 51;
 }
 
 /// À quel élément correspond une note MIDI.
@@ -114,7 +118,10 @@ const ANY_ACCENT: f32 = 0.25;
 fn slot_of(position_qn: f64, grid: &Grid) -> (i64, usize) {
     let per_bar = grid.slots_per_bar() as i64;
     let global = (position_qn * grid.slots_per_beat as f64).round() as i64;
-    (global.div_euclid(per_bar), global.rem_euclid(per_bar) as usize)
+    (
+        global.div_euclid(per_bar),
+        global.rem_euclid(per_bar) as usize,
+    )
 }
 
 /// Force de l'accent le plus fort du morceau dans chaque case de chaque mesure,
@@ -145,7 +152,12 @@ fn combined_accents(tracks: &[AccentMap]) -> Vec<(i64, Vec<f32>)> {
 ///
 /// `bars` est la liste des mesures du passage (voir `AccentMap::bars`) ; `accents` les cartes
 /// d'accents des pistes audio du même passage, sur la même grille.
-pub fn read_drums(track: &str, part: &[DrumNote], grid: &Grid, accents: &[AccentMap]) -> DrumReading {
+pub fn read_drums(
+    track: &str,
+    part: &[DrumNote],
+    grid: &Grid,
+    accents: &[AccentMap],
+) -> DrumReading {
     let combined = combined_accents(accents);
     let bar_count = combined.len().max(
         part.iter()
@@ -220,7 +232,10 @@ pub fn read_drums(track: &str, part: &[DrumNote], grid: &Grid, accents: &[Accent
             .unwrap_or(0.0)
     };
     let kicks_on_accents = (!kicks.is_empty() && !combined.is_empty()).then(|| {
-        kicks.iter().filter(|cell| accent_at(cell) >= ANY_ACCENT).count() as f32
+        kicks
+            .iter()
+            .filter(|cell| accent_at(cell) >= ANY_ACCENT)
+            .count() as f32
             / kicks.len() as f32
     });
 
@@ -253,58 +268,196 @@ fn lane_text(folded: &[f32], slots_per_beat: usize) -> String {
         .join(" ")
 }
 
-/// Ébauche de batterie calée sur les accents du morceau.
-///
-/// Règles volontairement simples, pour avoir un point de départ à retoucher :
-/// - grosse caisse sur le premier temps et sur chaque accent fort du morceau ;
-/// - caisse claire sur les temps 2 et 4 (un temps sur deux) ;
-/// - charleston fermé à la croche, plus appuyé sur les temps ;
-/// - crash sur le premier temps de la première mesure.
+/// Rapport entre la pulsation de la batterie et celle du morceau.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Feel {
+    /// Caisse claire sur les temps 2 et 4.
+    #[default]
+    Normal,
+    /// Caisse claire sur le temps 3 seulement : la batterie paraît deux fois plus lente.
+    HalfTime,
+    /// Caisse claire sur chaque contretemps : la batterie paraît deux fois plus rapide.
+    DoubleTime,
+}
+
+/// Ce que joue la main droite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Hat {
+    /// Charleston fermé à la croche.
+    #[default]
+    Eighths,
+    /// Charleston fermé à la double croche.
+    Sixteenths,
+    /// Charleston fermé à la noire.
+    Quarters,
+    /// Charleston ouvert à la croche.
+    Open,
+    /// Cymbale ride à la croche.
+    Ride,
+    /// Rien.
+    None,
+}
+
+/// Les choix de jeu d'une partie de batterie. C'est ce que l'IA décide ; le moteur écrit les
+/// notes à partir de ces choix et des accents du morceau.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DrumPlan {
+    /// Le style visé, en quelques mots. Pour l'affichage.
+    pub style: String,
+    /// Pourquoi ces choix. Pour l'affichage.
+    pub comment: String,
+    pub feel: Feel,
+    pub hat: Hat,
+    /// De 0 à 1 : 0 = grosse caisse sur le premier temps seulement, 0,5 = sur les accents forts,
+    /// 1 = sur tous les accents du morceau.
+    pub kick_density: f32,
+    /// Notes fantômes de caisse claire juste avant chaque coup de caisse claire.
+    pub ghost_notes: bool,
+    /// Crash sur le premier temps du passage.
+    pub crash: bool,
+    /// Roulement sur le dernier temps de la dernière mesure.
+    pub fill: bool,
+    /// De 0 à 1 : force de frappe générale.
+    pub intensity: f32,
+}
+
+impl Default for DrumPlan {
+    fn default() -> Self {
+        DrumPlan {
+            style: String::new(),
+            comment: String::new(),
+            feel: Feel::Normal,
+            hat: Hat::Eighths,
+            kick_density: 0.5,
+            ghost_notes: false,
+            crash: true,
+            fill: false,
+            intensity: 0.8,
+        }
+    }
+}
+
+impl DrumPlan {
+    /// Ramène les valeurs dans leurs bornes (une IA peut répondre 1,5 ou -1).
+    pub fn clamped(mut self) -> Self {
+        let unit = |v: f32| {
+            if v.is_finite() {
+                v.clamp(0.0, 1.0)
+            } else {
+                0.5
+            }
+        };
+        self.kick_density = unit(self.kick_density);
+        self.intensity = unit(self.intensity);
+        self
+    }
+}
+
+/// Ébauche de batterie calée sur les accents du morceau, avec les choix par défaut :
+/// grosse caisse sur le premier temps et les accents forts, caisse claire sur 2 et 4,
+/// charleston fermé à la croche, crash au début.
+pub fn sketch_drums(grid: &Grid, accents: &[AccentMap]) -> Vec<DrumNote> {
+    write_drums(grid, accents, &DrumPlan::default())
+}
+
+/// Écrit une partie de batterie calée sur les accents du morceau, selon les choix de `plan`.
 ///
 /// Une mesure où rien ne sonne reste vide.
-pub fn sketch_drums(grid: &Grid, accents: &[AccentMap]) -> Vec<DrumNote> {
+pub fn write_drums(grid: &Grid, accents: &[AccentMap], plan: &DrumPlan) -> Vec<DrumNote> {
+    let plan = plan.clone().clamped();
     let combined = combined_accents(accents);
-    let slots_per_beat = grid.slots_per_beat as usize;
+    let per_beat = grid.slots_per_beat as usize;
+    let half_beat = per_beat / 2;
+    // Seuil d'accent qui déclenche une grosse caisse : 0,95 (presque jamais) à densité 0,
+    // 0,6 (accents forts) à 0,5, 0,25 (tous les accents) à 1.
+    let kick_threshold = 0.95 - 0.7 * plan.kick_density;
+    // 1 à l'intensité par défaut (0,8).
+    let force = 0.6 + 0.5 * plan.intensity;
+    let velocity = |base: f32| (base * force).round().clamp(1.0, 127.0) as u8;
+
+    let on_beat = |slot: usize| slot.is_multiple_of(per_beat);
+    let on_backbeat = |slot: usize| match plan.feel {
+        Feel::Normal => on_beat(slot) && (slot / per_beat) % 2 == 1,
+        Feel::HalfTime => on_beat(slot) && (slot / per_beat) % 4 == 2,
+        Feel::DoubleTime => half_beat > 0 && slot % per_beat == half_beat,
+    };
+    let hat_note = match plan.hat {
+        Hat::Eighths | Hat::Sixteenths | Hat::Quarters => Some(notes::HAT_CLOSED),
+        Hat::Open => Some(notes::HAT_OPEN),
+        Hat::Ride => Some(notes::RIDE),
+        Hat::None => None,
+    };
+    let hat_plays = |slot: usize| match plan.hat {
+        Hat::Sixteenths => true,
+        Hat::Quarters => on_beat(slot),
+        Hat::None => false,
+        Hat::Eighths | Hat::Open | Hat::Ride => half_beat > 0 && slot.is_multiple_of(half_beat),
+    };
+
+    let sounding: Vec<usize> = combined
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, slots))| slots.iter().any(|&s| s >= ANY_ACCENT))
+        .map(|(index, _)| index)
+        .collect();
+    let (first, last) = (sounding.first().copied(), sounding.last().copied());
     let mut part = Vec::new();
 
-    for (index, (bar, slots)) in combined.iter().enumerate() {
-        if slots.iter().all(|&s| s < ANY_ACCENT) {
-            continue;
-        }
+    for &index in &sounding {
+        let (bar, slots) = &combined[index];
         let bar_qn = *bar as f64 * grid.beats_per_bar;
-        let at = |slot: usize| bar_qn + slot as f64 / slots_per_beat as f64;
-        let on_backbeat =
-            |slot: usize| slot.is_multiple_of(slots_per_beat) && (slot / slots_per_beat) % 2 == 1;
+        let at = |slot: usize| bar_qn + slot as f64 / per_beat as f64;
+        // Le roulement occupe le dernier temps entier de la dernière mesure.
+        let fill_from = (plan.fill && Some(index) == last && slots.len() >= per_beat)
+            .then(|| slots.len() - per_beat);
 
         for (slot, &strength) in slots.iter().enumerate() {
+            if let Some(start) = fill_from.filter(|&start| slot >= start) {
+                let step = slot - start;
+                let fill_notes = [notes::SNARE, notes::SNARE, notes::TOM_MID, notes::TOM_FLOOR];
+                part.push(DrumNote {
+                    position_qn: at(slot),
+                    note: fill_notes
+                        [(step * fill_notes.len() / per_beat).min(fill_notes.len() - 1)],
+                    velocity: velocity(84.0 + 28.0 * step as f32 / per_beat as f32),
+                });
+                continue;
+            }
             if on_backbeat(slot) {
                 part.push(DrumNote {
                     position_qn: at(slot),
                     note: notes::SNARE,
-                    velocity: 108,
+                    velocity: velocity(108.0),
                 });
-            } else if slot == 0 || strength >= STRONG_ACCENT {
+            } else if slot == 0 || strength >= kick_threshold {
                 part.push(DrumNote {
                     position_qn: at(slot),
                     note: notes::KICK,
-                    velocity: (96.0 + 24.0 * strength.clamp(0.0, 1.0)) as u8,
+                    velocity: velocity(96.0 + 24.0 * strength.clamp(0.0, 1.0)),
                 });
-            }
-            // Croches : une case sur deux quand la grille est en doubles croches.
-            let eighth = slots_per_beat.is_multiple_of(2) && slot % (slots_per_beat / 2) == 0;
-            if eighth {
+            } else if plan.ghost_notes && slot + 1 < slots.len() && on_backbeat(slot + 1) {
                 part.push(DrumNote {
                     position_qn: at(slot),
-                    note: notes::HAT_CLOSED,
-                    velocity: if slot % slots_per_beat == 0 { 88 } else { 66 },
+                    note: notes::SNARE,
+                    velocity: velocity(38.0),
+                });
+            }
+            if let Some(note) = hat_note.filter(|_| hat_plays(slot)) {
+                part.push(DrumNote {
+                    position_qn: at(slot),
+                    note,
+                    velocity: velocity(if on_beat(slot) { 88.0 } else { 66.0 }),
                 });
             }
         }
-        if index == 0 {
+        if plan.crash && Some(index) == first {
             part.push(DrumNote {
                 position_qn: at(0),
                 note: notes::CRASH,
-                velocity: 104,
+                velocity: velocity(104.0),
             });
         }
     }
@@ -444,6 +597,160 @@ mod tests {
         let part = sketch_drums(&grid(), &[map]);
         assert!(!part.iter().any(|n| (4.0..8.0).contains(&n.position_qn)));
         assert_eq!(part.iter().filter(|n| n.note == notes::CRASH).count(), 1);
+    }
+
+    fn slots_of(part: &[DrumNote], note: u8) -> Vec<usize> {
+        part.iter()
+            .filter(|n| n.note == note)
+            .map(|n| (n.position_qn * 4.0).round() as usize)
+            .collect()
+    }
+
+    #[test]
+    fn half_time_moves_the_snare_to_beat_three() {
+        let map = accents(&[&[(0, 1.0)]]);
+        let plan = DrumPlan {
+            feel: Feel::HalfTime,
+            ..DrumPlan::default()
+        };
+        assert_eq!(
+            slots_of(&write_drums(&grid(), &[map], &plan), notes::SNARE),
+            vec![8]
+        );
+    }
+
+    #[test]
+    fn double_time_puts_the_snare_on_every_offbeat() {
+        let map = accents(&[&[(0, 1.0)]]);
+        let plan = DrumPlan {
+            feel: Feel::DoubleTime,
+            ..DrumPlan::default()
+        };
+        assert_eq!(
+            slots_of(&write_drums(&grid(), &[map], &plan), notes::SNARE),
+            vec![2, 6, 10, 14]
+        );
+    }
+
+    #[test]
+    fn kick_density_decides_which_accents_get_a_kick() {
+        let map = accents(&[&[(0, 1.0), (6, 0.9), (10, 0.3)]]);
+        let kicks = |density: f32| {
+            let plan = DrumPlan {
+                kick_density: density,
+                ..DrumPlan::default()
+            };
+            slots_of(
+                &write_drums(&grid(), std::slice::from_ref(&map), &plan),
+                notes::KICK,
+            )
+        };
+        assert_eq!(kicks(0.0), vec![0]);
+        assert_eq!(kicks(0.5), vec![0, 6]);
+        assert_eq!(kicks(1.0), vec![0, 6, 10]);
+    }
+
+    #[test]
+    fn hat_choice_changes_the_note_and_the_rate() {
+        let map = accents(&[&[(0, 1.0)]]);
+        let with = |hat: Hat| {
+            let plan = DrumPlan {
+                hat,
+                ..DrumPlan::default()
+            };
+            write_drums(&grid(), std::slice::from_ref(&map), &plan)
+        };
+        assert_eq!(
+            slots_of(&with(Hat::Sixteenths), notes::HAT_CLOSED).len(),
+            16
+        );
+        assert_eq!(
+            slots_of(&with(Hat::Quarters), notes::HAT_CLOSED),
+            vec![0, 4, 8, 12]
+        );
+        assert_eq!(slots_of(&with(Hat::Ride), notes::RIDE).len(), 8);
+        assert_eq!(slots_of(&with(Hat::Open), notes::HAT_OPEN).len(), 8);
+        let none = with(Hat::None);
+        assert!(!none.iter().any(|n| matches!(
+            piece_of(n.note),
+            Piece::HatClosed | Piece::HatOpen | Piece::Ride
+        )));
+    }
+
+    #[test]
+    fn ghost_notes_sit_just_before_the_snare_and_stay_quiet() {
+        let map = accents(&[&[(0, 1.0)]]);
+        let plan = DrumPlan {
+            ghost_notes: true,
+            ..DrumPlan::default()
+        };
+        let part = write_drums(&grid(), &[map], &plan);
+        let snares: Vec<(usize, u8)> = part
+            .iter()
+            .filter(|n| n.note == notes::SNARE)
+            .map(|n| ((n.position_qn * 4.0).round() as usize, n.velocity))
+            .collect();
+        assert_eq!(
+            snares.iter().map(|s| s.0).collect::<Vec<_>>(),
+            vec![3, 4, 11, 12]
+        );
+        assert!(snares[0].1 < 50 && snares[1].1 > 100, "{snares:?}");
+    }
+
+    #[test]
+    fn fill_replaces_the_last_beat_of_the_last_bar_only() {
+        let map = accents(&[&[(0, 1.0)], &[(0, 1.0)]]);
+        let plan = DrumPlan {
+            fill: true,
+            ..DrumPlan::default()
+        };
+        let part = write_drums(&grid(), &[map], &plan);
+        let last_beat: Vec<u8> = part
+            .iter()
+            .filter(|n| n.position_qn >= 7.0)
+            .map(|n| n.note)
+            .collect();
+        assert_eq!(
+            last_beat,
+            vec![notes::SNARE, notes::SNARE, notes::TOM_MID, notes::TOM_FLOOR]
+        );
+        // La première mesure garde sa caisse claire sur le temps 4 et son charleston.
+        assert!(part
+            .iter()
+            .any(|n| n.note == notes::SNARE && (n.position_qn - 3.0).abs() < 1e-9));
+        assert!(part
+            .iter()
+            .any(|n| n.note == notes::HAT_CLOSED && (n.position_qn - 3.5).abs() < 1e-9));
+    }
+
+    #[test]
+    fn intensity_scales_how_hard_the_drums_hit() {
+        let map = accents(&[&[(0, 1.0)]]);
+        let snare = |intensity: f32| {
+            let plan = DrumPlan {
+                intensity,
+                ..DrumPlan::default()
+            };
+            write_drums(&grid(), std::slice::from_ref(&map), &plan)
+                .iter()
+                .find(|n| n.note == notes::SNARE)
+                .unwrap()
+                .velocity
+        };
+        assert!(snare(0.2) < snare(0.8) && snare(0.8) < snare(1.0));
+        assert_eq!(snare(0.8), 108);
+    }
+
+    #[test]
+    fn out_of_range_choices_are_brought_back_in_range() {
+        let plan = DrumPlan {
+            kick_density: 3.0,
+            intensity: f32::NAN,
+            ..DrumPlan::default()
+        }
+        .clamped();
+        assert_eq!(plan.kick_density, 1.0);
+        assert_eq!(plan.intensity, 0.5);
     }
 
     #[test]

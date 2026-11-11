@@ -45,7 +45,10 @@ impl Grid {
     pub fn from_project(span: ProjectSpan, slots_per_beat: u32) -> Option<Grid> {
         let seconds = span.end_s - span.start_s;
         let quarter_notes = span.end_qn - span.start_qn;
-        if seconds <= 0.0 || quarter_notes <= 0.0 || span.bar_length_qn <= 0.0 || slots_per_beat == 0
+        if seconds <= 0.0
+            || quarter_notes <= 0.0
+            || span.bar_length_qn <= 0.0
+            || slots_per_beat == 0
         {
             return None;
         }
@@ -62,7 +65,9 @@ impl Grid {
     }
 
     pub fn slots_per_bar(&self) -> usize {
-        (self.beats_per_bar * self.slots_per_beat as f64).round().max(1.0) as usize
+        (self.beats_per_bar * self.slots_per_beat as f64)
+            .round()
+            .max(1.0) as usize
     }
 
     pub fn bar_s(&self) -> f64 {
@@ -127,7 +132,9 @@ pub fn accent_map(audio: &Audio, onsets: &[Onset], grid: Grid) -> AccentMap {
         let global_slot = ((onset.time_s - grid.origin_s) / slot_s).round() as i64;
         let bar = global_slot.div_euclid(slots_per_bar);
         let slot = global_slot.rem_euclid(slots_per_bar) as usize;
-        if let Some(accents) = bars.get_mut((bar - first_bar) as usize).filter(|_| bar >= first_bar)
+        if let Some(accents) = bars
+            .get_mut((bar - first_bar) as usize)
+            .filter(|_| bar >= first_bar)
         {
             accents.slots[slot] = accents.slots[slot].max(onset.strength);
             onsets_used += 1;

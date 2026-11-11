@@ -5,8 +5,8 @@ use std::ffi::{c_char, CStr, CString};
 use std::ptr::null_mut;
 
 use aidrummer_engine::{
-    accent_map, detect_onsets_after_preroll, read_drums, sketch_drums, AccentMap, Audio, DrumNote,
-    Grid, ProjectSpan, SelectionAnalysis, TrackAccents,
+    accent_map, detect_onsets_after_preroll, read_drums, write_drums, AccentMap, Audio, DrumNote,
+    DrumPlan, Grid, ProjectSpan, SelectionAnalysis, TrackAccents,
 };
 use reaper_medium::{MediaTrack, PositionInSeconds, ProjectContext, Reaper, TimeRangeType};
 
@@ -49,47 +49,65 @@ pub fn analyze_selection(reaper: &Reaper) -> Result<SelectionAnalysis, String> {
     Ok(analyze(reaper, start_s, end_s, &project_grid))
 }
 
-/// Écrit une ébauche de batterie sur la sélection, dans un nouvel item MIDI de la piste
-/// « AI Drummer » (créée au besoin). Renvoie un message pour la console.
-pub fn write_sketch(reaper: &Reaper) -> Result<String, String> {
+/// Un passage analysé, prêt à recevoir une batterie. Ne contient que des données : il peut
+/// attendre la réponse de l'IA hors du fil principal.
+pub struct Passage {
+    pub analysis: SelectionAnalysis,
+    grid: ProjectGrid,
+}
+
+/// Analyse la sélection et vérifie qu'on peut y caler une batterie.
+pub fn prepare_passage(reaper: &Reaper) -> Result<Passage, String> {
     let (start_s, end_s) = selection(reaper)?;
-    let project_grid = read_grid(reaper, start_s, end_s)?;
-    let analysis = analyze(reaper, start_s, end_s, &project_grid);
+    let grid = read_grid(reaper, start_s, end_s)?;
+    let analysis = analyze(reaper, start_s, end_s, &grid);
     if analysis.tracks.is_empty() {
         return Err(
             "Aucune piste ne contient de son dans la sélection : rien sur quoi caler une batterie."
                 .to_string(),
         );
     }
-    let maps: Vec<AccentMap> = analysis.tracks.iter().map(|t| t.accents.clone()).collect();
-    let part: Vec<DrumNote> = sketch_drums(&project_grid.grid, &maps)
+    Ok(Passage { analysis, grid })
+}
+
+/// Écrit une batterie sur le passage, selon `plan`, dans un nouvel item MIDI de la piste
+/// « AI Drummer » (créée au besoin). Renvoie un message pour la console.
+pub fn write_passage(
+    reaper: &Reaper,
+    passage: &Passage,
+    plan: &DrumPlan,
+) -> Result<String, String> {
+    let (start_s, end_s) = (passage.analysis.start_s, passage.analysis.end_s);
+    let grid = &passage.grid;
+    let maps: Vec<AccentMap> = passage
+        .analysis
+        .tracks
+        .iter()
+        .map(|t| t.accents.clone())
+        .collect();
+    let part: Vec<DrumNote> = write_drums(&grid.grid, &maps, plan)
         .into_iter()
         .filter(|note| {
-            let qn = project_grid.origin_qn + note.position_qn;
-            qn >= project_grid.start_qn - EDGE_QN && qn < project_grid.end_qn - EDGE_QN
+            let qn = grid.origin_qn + note.position_qn;
+            qn >= grid.start_qn - EDGE_QN && qn < grid.end_qn - EDGE_QN
         })
         .collect();
     if part.is_empty() {
-        return Err("L'ébauche ne contient aucune note sur cette sélection.".to_string());
+        return Err("La batterie ne contient aucune note sur cette sélection.".to_string());
     }
 
     let low = reaper.low();
     unsafe { low.Undo_BeginBlock2(null_mut()) };
-    let written = write_part(reaper, &part, start_s, end_s, project_grid.origin_qn);
-    unsafe {
-        low.Undo_EndBlock2(
-            null_mut(),
-            c"AI Drummer : ébauche de batterie".as_ptr(),
-            -1,
-        )
-    };
+    let written = write_part(reaper, &part, start_s, end_s, grid.origin_qn);
+    unsafe { low.Undo_EndBlock2(null_mut(), c"AI Drummer : batterie".as_ptr(), -1) };
     low.UpdateArrange();
     written?;
 
     Ok(format!(
         "{} notes écrites sur la piste « {SKETCH_TRACK} », de {start_s:.3} s à {end_s:.3} s, calées sur : {}.\n  Pour annuler : Édition → Annuler.",
         part.len(),
-        analysis
+        passage
+            .analysis
             .tracks
             .iter()
             .map(|t| t.name.as_str())
@@ -171,7 +189,9 @@ fn read_grid(reaper: &Reaper, start_s: f64, end_s: f64) -> Result<ProjectGrid, S
         Ok(reaper.time_map_2_time_to_qn(PROJECT, position).get())
     };
     let start = PositionInSeconds::new(start_s).map_err(|e| e.to_string())?;
-    let measure_index = reaper.time_map_2_time_to_beats(PROJECT, start).measure_index;
+    let measure_index = reaper
+        .time_map_2_time_to_beats(PROJECT, start)
+        .measure_index;
     let measure = reaper.time_map_get_measure_info(PROJECT, measure_index);
 
     let (start_qn, end_qn) = (qn_at(start_s)?, qn_at(end_s)?);

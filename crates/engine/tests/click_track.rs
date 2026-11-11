@@ -17,7 +17,11 @@ fn click_track(bpm: f64, seconds: f64) -> Audio {
         let beat_index = (t / period).floor();
         let since_beat = t - beat_index * period;
         let downbeat = (beat_index as u64).is_multiple_of(4);
-        let (freq, gain) = if downbeat { (1500.0, 0.6) } else { (1000.0, 0.4) };
+        let (freq, gain) = if downbeat {
+            (1500.0, 0.6)
+        } else {
+            (1000.0, 0.4)
+        };
         let click = gain * (-since_beat * 60.0).exp() * (std::f64::consts::TAU * freq * t).sin();
         let chord: f64 = [220.0, 261.63, 329.63]
             .iter()

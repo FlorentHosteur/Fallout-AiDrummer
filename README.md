@@ -15,12 +15,13 @@ C'est un squelette. Ce qui existe aujourd'hui :
 
 | Élément | État |
 |---|---|
-| Extension chargée par REAPER, avec trois actions | fonctionne dans REAPER 7 sous macOS ; sous Windows, compile mais n'a pas encore été chargée |
+| Extension chargée par REAPER, avec sept actions | fonctionne dans REAPER 7 sous macOS ; sous Windows, compile mais n'a pas encore été chargée |
 | « Analyser la sélection » : carte d'accents de chaque piste audio, et lecture de la batterie MIDI existante | fonctionne ; exact sur un projet de synthèse, plausible mais non vérifié à l'oreille sur un vrai projet |
-| « Écrire une ébauche de batterie sur la sélection » : item MIDI calé sur les accents du morceau | fonctionne ; règles simples, sans IA |
+| « Écrire une ébauche de batterie » : item MIDI calé sur les accents du morceau, par règles | fonctionne |
+| « Batterie avec l'IA » : une IA choisit le jeu (pulsation, charleston, densité, roulement), avec ou sans consigne écrite | fonctionne contre un faux fournisseur local ; pas encore essayé avec un vrai fournisseur |
 | La carte d'accents sur un fichier audio, en ligne de commande | fonctionne |
 | Recherche du tempo dans l'audio, sans le projet | fonctionne ; juste sur des clics de synthèse |
-| Conseils sur une batterie existante, consignes écrites, appel à une IA, panneau | à faire |
+| Conseils sur une batterie existante, panneau | à faire |
 
 Limite connue : la grille de temps et la tonalité renvoyées par la bibliothèque `stratum-dsp` (commande `analyze`) sont peu fiables. La carte d'accents ne s'en sert pas : elle part du tempo du projet REAPER.
 
@@ -161,7 +162,38 @@ Avec une sélection de temps, lance « AI Drummer : écrire une ébauche de batt
 
 Les notes écrites (36, 38, 42, 49) sont communes à General MIDI et à la table Toontrack. La piste n'a pas d'instrument : pose ta batterie virtuelle dessus, ou glisse l'item sur ta piste de batterie. Une seule annulation (*Édition → Annuler*) retire tout.
 
-C'est un point de départ à retoucher, fait de règles simples. Le choix du style et des variations par une IA viendra ensuite.
+C'est un point de départ à retoucher, fait de règles simples. Pour un jeu choisi selon le morceau, voir « Batterie avec l'IA ».
+
+### Batterie avec l'IA
+
+L'IA ne reçoit pas l'audio et n'écrit pas les notes. Elle reçoit le compte rendu chiffré du passage (celui de l'analyse, plus le niveau sonore par mesure) et choisit comment jouer : pulsation normale, demi-temps ou tempo doublé ; charleston, charleston ouvert ou ride ; densité de grosse caisse ; notes fantômes ; crash ; roulement de fin ; intensité. Le moteur écrit ensuite les notes, grosse caisse calée sur les accents du morceau.
+
+**Réglages.** Lance « AI Drummer : réglages de l'IA ». La console donne le chemin du fichier `AIDrummer/reglages-ia.json` (créé au premier appel) dans le dossier de ressources de REAPER. Ouvre-le avec un éditeur de texte et complète-le :
+
+```json
+{
+  "base_url": "https://openrouter.ai/api/v1",
+  "model": "",
+  "api_key": ""
+}
+```
+
+| Réglage | Sens |
+|---|---|
+| `base_url` | L'adresse d'une API compatible OpenAI. `https://openrouter.ai/api/v1` pour OpenRouter, `https://api.openai.com/v1` pour OpenAI, ou toute autre adresse qui parle le même protocole (un serveur local, par exemple). |
+| `model` | Le nom du modèle chez ce fournisseur. « AI Drummer : lister les modèles de l'IA » affiche les noms disponibles ; copie celui que tu veux. |
+| `api_key` | Ta clé d'accès. Elle est enregistrée en clair dans ce fichier : ne le partage pas. Tu peux la laisser vide et la donner par la variable d'environnement `AIDRUMMER_API_KEY`. |
+
+Le fichier est relu à chaque demande : pas besoin de redémarrer REAPER.
+
+**Utilisation.** Avec une sélection de temps :
+
+- « AI Drummer : batterie avec l'IA sur la sélection » laisse l'IA choisir seule ;
+- « AI Drummer : batterie avec l'IA, avec une consigne » ouvre une boîte de saisie. Écris ce que tu veux (« plus lourd, en demi-temps », « léger, à la ride, sans crash ») ; la consigne passe avant le goût de l'IA.
+
+REAPER reste utilisable pendant l'attente. À la réponse, la console affiche les choix de l'IA et son explication, et la batterie est écrite sur la piste « AI Drummer ». Une seule annulation la retire. La dernière réponse est gardée dans `AIDrummer/derniere-reponse-ia.json`.
+
+Chaque demande est facturée par ton fournisseur selon le modèle choisi. Le message envoyé tient en quelques centaines de mots.
 
 ### Vérifier que l'extension est chargée
 
@@ -209,7 +241,7 @@ Un test est volontairement ignoré : il documente l'imprécision de la grille de
 
 | Dossier | Rôle |
 |---|---|
-| `crates/engine` | Le moteur : décodage audio, détection d'attaques, carte d'accents, lecture et ébauche de batterie. Ne dépend pas de REAPER, se teste seul. |
+| `crates/engine` | Le moteur : décodage audio, détection d'attaques, carte d'accents, lecture et écriture de batterie, appel à l'IA. Ne dépend pas de REAPER, se teste seul. |
 | `crates/cli` | La commande `aidrummer`, pour essayer le moteur sans REAPER. |
 | `crates/reaper-ext` | L'extension chargée par REAPER. Elle s'appuie sur [reaper-rs](https://github.com/helgoboss/reaper-rs). |
 | `scripts` | Compilation et installation dans REAPER. |
